@@ -1,12 +1,19 @@
 module Web.Convent.Storage.EventStore where
 
 import Data.ByteString (ByteString)
-import System.IO (hSeek, hFileSize, SeekMode(..), hGet)
+import qualified Data.ByteString as ByteString
+import qualified System.IO as IO
 
-loadPage :: Int -> Handle -> IO ByteString
+data PageLoadError = FileTooSmall
+
+loadPage :: Int -> IO.Handle -> IO (Either PageLoadError ByteString)
 loadPage pageIdx h = do
-  fileSize <- hFileSize h
+  fileSize <- IO.hFileSize h
   let pageSize = 8192
   let offset = fromIntegral pageIdx * pageSize
-  hSeek h AbsoluteSeek offset
-  hGet h pageSize
+  if fileSize < offset + pageSize
+    then return $ Left FileTooSmall
+    else do
+      IO.hSeek h IO.AbsoluteSeek offset
+      page <- ByteString.hGet h (fromIntegral pageSize)
+      return $ Right page
