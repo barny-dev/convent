@@ -1,8 +1,7 @@
 module Web.Convent.Storage.EventStore where
 
 import Data.ByteString (ByteString)
-import System.IO (Handle, hSeek, hFileSize, SeekMode(..))
-import qualified System.IO as IO
+import System.IO (hSeek, hFileSize, SeekMode(..), hGet)
 
 loadPage :: Int -> Handle -> IO ByteString
 loadPage pageIdx h = do
@@ -10,4 +9,4 @@ loadPage pageIdx h = do
   let pageSize = 8192
   let offset = fromIntegral pageIdx * pageSize
   hSeek h AbsoluteSeek offset
-  IO.hGet h pageSize
+  hGet h pageSize
