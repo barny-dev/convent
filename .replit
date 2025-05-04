@@ -14,3 +14,14 @@ start = ["haskell-language-server-wrapper", "--lsp"]
 
 [gitHubImport]
 requiredFiles = [".replit", "replit.nix", ".ghci"]
+
+[workflows]
+
+[[workflows.workflow]]
+name = "run tests"
+mode = "sequential"
+author = 15957099
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cabal build all && cabal test"
