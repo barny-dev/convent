@@ -2,6 +2,7 @@ module Web.Convent.Storage.EventStore where
 
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
+import qualified Data.ByteString.Lazy as ByteString.Lazy
 import qualified System.IO as IO
 import Control.Exception (IOException)
 import Data.Word (Word16)
@@ -51,7 +52,7 @@ writePage h pageIdx page = do
       return $ Right ()
 
 parsePage :: ByteString -> Either PageParseError Page
-parsePage bs = runGet pageParser bs where
+parsePage bs = runGet pageParser (ByteString.Lazy.fromStrict bs) where
   pageParser :: Get (Either PageParseError Page)
   pageParser = do
     reserve <- getWord16be
