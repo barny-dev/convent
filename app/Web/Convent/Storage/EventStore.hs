@@ -5,7 +5,7 @@ import qualified Data.ByteString as ByteString
 import qualified System.IO as IO
 import Control.Exception (IOException)
 import Data.Word (Word16)
-import Data.Binary (Get, runGet, getWord16be)
+import Data.Binary.Get (Get, getWord16be, runGet)
 import qualified Data.Binary.Get as Get
 
 data PageReadError =
