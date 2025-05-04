@@ -12,15 +12,15 @@ import qualified Data.Binary.Get as Get
 data PageReadError =
   ReadFileTooSmall |
   ReadIOError IOException
-  deriving (Show)
+  deriving (Show, Eq)
 
 data PageWriteError = 
   WritePageSizeMismatch |
   WriteIOError IOException 
-  deriving (Show)
+  deriving (Show, Eq)
 
 data PageParseError = InvalidReservePointer
-  deriving (Show)
+  deriving (Show, Eq)
 
 data Page = Page {
   reservePtr :: Word16,
