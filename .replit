@@ -18,9 +18,18 @@ requiredFiles = [".replit", "replit.nix", ".ghci"]
 [workflows]
 
 [[workflows.workflow]]
-name = "test"
+name = "run tests"
 mode = "sequential"
 author = 15957099
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cabal build —enable-tests && cabal test —enable-tests"
+
+[[workflows.workflow]]
+name = "Run Tests"
+author = 15957099
+mode = "sequential"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
