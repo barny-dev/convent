@@ -84,7 +84,7 @@ test-suite new-project-test
     hs-source-dirs:   test, app
     build-depends:    base ^>=4.18.2.1
                    , bytestring
-                   , hspec
+                   , hspec == 2.11.8
                    , temporary
-                   , directory
+                   , directory 
     default-language: Haskell2010

@@ -9,7 +9,7 @@ import System.IO (withFile, IOMode(..))
 
 spec :: Spec
 spec = describe "EventStore" $ do
-  describe "loadPage" $ do
+  describe "readPage" $ do
     it "should load the second page filled with ones" $ do
       withSystemTempFile "test.dat" $ \path handle -> do
         -- Create first page of zeros
@@ -17,11 +17,9 @@ spec = describe "EventStore" $ do
         -- Create second page of ones
         BS.hPut handle (BS.replicate 8192 1)
         
-        -- Close the file and reopen it for reading
-        withFile path ReadMode $ \h -> do
-          result <- loadPage 1 h
-          case result of
-            Right page -> do
-              BS.length page `shouldBe` 8192
-              all (== 1) (BS.unpack page) `shouldBe` True
-            Left err -> fail $ "Expected Right but got Left: " ++ show err
+        result <- readPage handle 1
+        case result of
+          Right page -> do
+            BS.length page `shouldBe` 8192
+            all (== 1) (BS.unpack page) `shouldBe` True
+          Left err -> fail $ "Expected Right but got Left: " ++ show err
