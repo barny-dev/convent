@@ -68,7 +68,7 @@ executable new-project
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.18.2.1, bytestring, binary, vector == 0.13.1.0
+    build-depends:    base ^>=4.18.2.1, bytestring, binary
 
     -- Directories containing source files.
     hs-source-dirs:   app
