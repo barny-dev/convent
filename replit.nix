@@ -1,5 +1,6 @@
 { pkgs }: {
   deps = [
+    pkgs.haskellPackages.vector
     pkgs.haskellPackages.hspec
     pkgs.haskellPackages.temporary
     pkgs.haskellPackages.ghc
