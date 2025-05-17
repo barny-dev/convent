@@ -10,62 +10,84 @@ import System.IO (withFile, IOMode(..))
 
 spec :: Spec
 spec = describe "EventStore" $ do
-  describe "readPage" $ do
-    it "should load the second page filled with ones" $ do
+  describe "emptyPage" $ do
+    it "should create a valid empty page" $ do
+      let page = emptyPage
+      reservePtr page `shouldBe` 2
+      toByteString page `shouldSatisfy` \bs -> BS.length bs == 8192
+
+  describe "fromByteString/toByteString" $ do
+    it "should handle valid page data" $ do
+      let page = emptyPage
+      let bytes = toByteString page
+      fromByteString bytes `shouldBe` Right page
+
+    it "should reject invalid page size" $ do
+      fromByteString (BS.replicate 100 0) `shouldBe` Left (InvalidPageSizeError 100)
+
+    it "should reject invalid reserve pointer" $ do
+      let invalidPage = BS.replicate 8192 0
+      fromByteString invalidPage `shouldBe` Left (InvalidReservePtrError 0)
+
+  describe "segment operations" $ do
+    let testSegment = BS.pack [1,2,3,4]
+    let pageWithSegment = do
+          page <- addSegment emptyPage testSegment
+          return page
+
+    it "should add and retrieve segments" $ do
+      case pageWithSegment of
+        Nothing -> expectationFailure "Failed to add segment"
+        Just page -> do
+          segment page 0 `shouldBe` Just testSegment
+          segmentCopy page 0 `shouldBe` Just testSegment
+          segmentPtr page 0 `shouldBe` Just (8192 - fromIntegral (BS.length testSegment))
+
+    it "should handle invalid segment index" $ do
+      case pageWithSegment of
+        Nothing -> expectationFailure "Failed to add segment"
+        Just page -> do
+          segment page 1 `shouldBe` Nothing
+          segmentCopy page 1 `shouldBe` Nothing
+          segmentPtr page 1 `shouldBe` Nothing
+
+  describe "reserve space" $ do
+    it "should calculate correct reserve space" $ do
+      let page = emptyPage
+      reserve page `shouldBe` 8190
+
+    it "should update reserve after adding segment" $ do
+      let testSegment = BS.pack [1,2,3,4]
+      case addSegment emptyPage testSegment of
+        Nothing -> expectationFailure "Failed to add segment"
+        Just page -> do
+          reserve page `shouldBe` (8190 - fromIntegral (BS.length testSegment) - 2)
+
+  describe "file operations" $ do
+    it "should write and read page" $ do
       withSystemTempFile "test.dat" $ \path handle -> do
-        -- Create first page of zeros
-        BS.hPut handle (BS.replicate 8192 0)
-        -- Create second page of ones
-        BS.hPut handle (BS.replicate 8192 1)
-        
+        let page = emptyPage
+        writePage handle 0 page
+        result <- readPage handle 0
+        result `shouldBe` Right page
+
+    it "should handle reading beyond file size" $ do
+      withSystemTempFile "test.dat" $ \path handle -> do
         result <- readPage handle 1
-        case result of
-          Right page -> do
-            BS.length page `shouldBe` 8192
-            all (== 1) (BS.unpack page) `shouldBe` True
-          Left err -> fail $ "Expected Right but got Left: " ++ show err
+        result `shouldBe` Left ReadFileTooSmallError
 
-  describe "parsePage" $ do
-    let makePage reserve ptrs = 
-          let headerBS = BS.pack $ concatMap word16ToBytes (reserve:ptrs)
-              padding = BS.replicate (8192 - BS.length headerBS) 0
-          in headerBS <> padding
-        word16ToBytes w = [fromIntegral (w `div` 256), fromIntegral (w `mod` 256)]
-
-    it "should parse valid page with multiple pointers" $ do
-      let page = makePage 100 [80, 60, 40, 20]
-      case parsePage page of
-        Right p -> do
-          reservePtr p `shouldBe` 100
-          pointers p `shouldBe` [80, 60, 40, 20]
-          length (segments p) `shouldBe` 4
-        Left err -> fail $ "Expected Right but got Left: " ++ show err
-
-    it "should parse valid page with one pointer" $ do
-      let page = makePage 50 [30]
-      case parsePage page of
-        Right p -> do
-          reservePtr p `shouldBe` 50
-          pointers p `shouldBe` [30]
-          length (segments p) `shouldBe` 1
-        Left err -> fail $ "Expected Right but got Left: " ++ show err
-
-    it "should reject page with reserve pointer >= 8192" $ do
-      let page = makePage 8192 [80, 60]
-      parsePage page `shouldBe` Left InvalidReservePointer
-
-    it "should reject page with non-descending pointers" $ do
-      let page = makePage 100 [80, 90, 40]
-      case parsePage page of
-        Right p -> do
-          pointers p `shouldBe` [80]
-        Left err -> fail $ "Expected Right but got Left: " ++ show err
-
-    it "should allow last pointer equal to reserve pointer" $ do
-      let page = makePage 100 [80, 100]
-      case parsePage page of
-        Right p -> do
-          reservePtr p `shouldBe` 100
-          pointers p `shouldBe` [80, 100]
-          length (segments p) `shouldBe` 2
-        Left err -> fail $ "Expected Right but got Left: " ++ show err
+    it "should write and read multiple pages" $ do
+      withSystemTempFile "test.dat" $ \path handle -> do
+        let page1 = emptyPage
+        let page2 = case addSegment emptyPage (BS.pack [1,2,3,4]) of
+                     Just p -> p
+                     Nothing -> error "Failed to create test page"
+        
+        writePage handle 0 page1
+        writePage handle 1 page2
+        
+        result1 <- readPage handle 0
+        result2 <- readPage handle 1
+        
+        result1 `shouldBe` Right page1
+        result2 `shouldBe` Right page2
