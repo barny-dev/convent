@@ -16,8 +16,8 @@ Chat events are stored in a binary file using fixed-size pages of 8192 bytes eac
 ### Events Page Layout
 ```
 +----------------+---------------------+------------------------+
-| Reserve (2B)   | Event Pointers     | Event Data            |
-+----------------+---------------------+------------------------+
+| Reserve (2B)   | Event Pointers     |    Reserve Space      | Event Data |
++----------------+---------------------+------------------------|------------|
 ```
 
 Each page consists of:
@@ -27,6 +27,7 @@ Each page consists of:
    - Always even-numbered (aligned to 2 bytes)
    - Minimum value: 2 (empty page)
    - Maximum value: 8192
+   - May equal the last event pointer when page is completely full
 
 2. **Event Pointers** (2 bytes each)
    - Array of pointers to event data
@@ -36,11 +37,17 @@ Each page consists of:
    - Points to the start of corresponding event data
    - Stored in ascending order
 
-3. **Event Data**
+3. **Reserve Space**
+   - Empty space between event pointers and event data
+   - Size = Last event pointer - Reserve pointer
+   - Zero bytes when page is completely full
+
+4. **Event Data**
    - Actual event content
    - Grows backward from end of page
    - Each event is stored contiguously
    - No padding or alignment requirements
+   - First event added to page ends at page boundary (8192)
 
 ### Space Management
 
@@ -70,13 +77,13 @@ For a page containing three events:
 ```
 Position  Content                 Description
 0000      0008                   Reserve pointer (8)
-0002      8180                   Pointer to Event 1
+0002      8180                   Pointer to Event 3 (added last)
 0004      8190                   Pointer to Event 2
-0006      8192                   Pointer to Event 3
-0008      ...                    Unused space
-8180      [Event 1 data]         10 bytes of event data
+0006      8192                   Pointer to Event 1 (added first)
+0008      ...                    Reserve space
+8180      [Event 3 data]         10 bytes of event data
 8190      [Event 2 data]         2 bytes of event data
-8192      End of page
+8192      [End of Event 1]       Event 1 ends at page boundary
 ```
 
 ## Page Validation
