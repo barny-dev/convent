@@ -38,31 +38,31 @@ spec = describe "IndexPage" $ do
             BS.replicate (8192 - 48) 0]
       fromByteString page `shouldBe` Left (NonZeroTrailingSegmentError 2)
 
-  describe "indexSegmentCount" $ do
-    it "should count segments correctly" $ do
+  describe "entryCount" $ do
+    it "should count entries correctly" $ do
       let page = BS.concat [
-            BS.pack [0,0,0,0,0,0,0,10], BS.pack [0,0,0,0,0,0,0,20],  -- first segment
-            BS.pack [0,0,0,0,0,0,0,20], BS.pack [0,0,0,0,0,0,0,30],  -- second segment
+            BS.pack [0,0,0,0,0,0,0,10], BS.pack [0,0,0,0,0,0,0,20],  -- first entry
+            BS.pack [0,0,0,0,0,0,0,20], BS.pack [0,0,0,0,0,0,0,30],  -- second entry
             BS.replicate (8192 - 32) 0]
       case fromByteString page of
-        Right indexPage -> indexSegmentCount indexPage `shouldBe` 2
+        Right indexPage -> entryCount indexPage `shouldBe` 2
         Left err -> expectationFailure $ "Failed to create test page: " ++ show err
 
-  describe "indexSegments" $ do
-    it "should return all non-zero segments" $ do
+  describe "entries" $ do
+    it "should return all non-zero entries" $ do
       let page = BS.concat [
-            BS.pack [0,0,0,0,0,0,0,10], BS.pack [0,0,0,0,0,0,0,20],  -- first segment
-            BS.pack [0,0,0,0,0,0,0,20], BS.pack [0,0,0,0,0,0,0,30],  -- second segment
+            BS.pack [0,0,0,0,0,0,0,10], BS.pack [0,0,0,0,0,0,0,20],  -- first entry
+            BS.pack [0,0,0,0,0,0,0,20], BS.pack [0,0,0,0,0,0,0,30],  -- second entry
             BS.replicate (8192 - 32) 0]
       case fromByteString page of
-        Right indexPage -> indexSegments indexPage `shouldBe` [
-          IndexSegment 10 20,
-          IndexSegment 20 30
+        Right indexPage -> entries indexPage `shouldBe` [
+          IndexEntry 10 20,
+          IndexEntry 20 30
           ]
         Left err -> expectationFailure $ "Failed to create test page: " ++ show err
 
-  describe "indexSegment" $ do
-    it "should return specific segment" $ do
+  describe "entry" $ do
+    it "should return specific entry" $ do
       let page = BS.concat [
             BS.pack [0,0,0,0,0,0,0,10], BS.pack [0,0,0,0,0,0,0,20],  -- first segment
             BS.pack [0,0,0,0,0,0,0,20], BS.pack [0,0,0,0,0,0,0,30],  -- second segment

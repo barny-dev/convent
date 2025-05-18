@@ -23,8 +23,8 @@ instance Show IndexPage where
 -- | Possible errors that can occur when reading an index page
 data IndexPageError =
   InvalidPageSizeError Int |      -- ^ Page size is not 8192 bytes
-  InvalidSegmentError Int |       -- ^ Segment data is invalid
-  NonZeroTrailingSegmentError Int |  -- ^ Found non-zero segment after a zero segment
+  InvalidEntryError Int |         -- ^ Entry data is invalid
+  NonZeroTrailingEntryError Int | -- ^ Found non-zero entry after a zero entry
   NonAscendingOffsetError Int |   -- ^ Page offsets are not strictly ascending
   NonAscendingEventOffsetError Int -- ^ Event offsets are not strictly ascending
   deriving (Show, Eq)
