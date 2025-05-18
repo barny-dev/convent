@@ -4,6 +4,9 @@ module Web.Convent.Storage.IndexPage
   , fromByteString
   , toByteString
   , entryCount
+
+  , emptyPage
+
   , entries
   , entry
   ) where
@@ -36,6 +39,12 @@ fromByteString rawPage = do
   let pageSize = ByteString.length rawPage
   (InvalidPageSizeError pageSize) `whenNot` (pageSize == 8192)
   validateSegments rawPage 0 (0, 0)
+
+-- | Creates an empty index page with no entries
+emptyPage :: IndexPage
+emptyPage = IndexPage $ ByteString.replicate 8192 0
+
+
   return $ IndexPage rawPage
   where
     whenNot err cond = if cond then Right () else Left err

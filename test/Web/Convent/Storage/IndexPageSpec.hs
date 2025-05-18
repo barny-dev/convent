@@ -14,7 +14,7 @@ spec = describe "IndexPage" $ do
 
     it "should accept empty index page" $ do
       let page = BS.replicate 8192 0
-      fromByteString page `shouldBe` Right (IndexPage page)
+      fromByteString page `shouldBe` Right emptyPage
 
     it "should reject non-ascending page offsets" $ do
       let page = BS.concat [
