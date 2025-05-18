@@ -19,6 +19,7 @@ import qualified Data.ByteString as ByteString
 import qualified Data.ByteString.Builder as ByteString.Builder
 import qualified Data.ByteString.Lazy as ByteString.Lazy
 import Data.Word (Word16)
+import Web.Convent.Util.ByteString (readW16BE)
 
 newtype EventsPage = EventsPage ByteString deriving (Eq)
 
@@ -109,8 +110,4 @@ eventPtrUnsafe :: EventsPage -> Word16 -> Word16
 eventPtrUnsafe (EventsPage rawPage) ix =
   readW16BE rawPage $ (fromIntegral ix) * 2 + 2
 
-readW16BE :: ByteString -> Int -> Word16
-readW16BE bs offset =
-  let hi = (fromIntegral $ ByteString.index bs offset) * 256
-      lo = fromIntegral $ ByteString.index bs (offset + 1)
-   in hi + lo
+
