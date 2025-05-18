@@ -4,6 +4,7 @@ module Web.Convent.Storage.EventStore
   , PageReadError(..)
   , fromByteString
   , toByteString
+  , segmentCount
   , segmentPtr
   , segment
   , segmentCopy
@@ -90,7 +91,7 @@ segmentCopy page ix = fmap ByteString.copy (segment page ix)
 
 segment :: Page -> Word16 -> Maybe ByteString
 segment page ix =
-  if segmentCount page < ix
+  if segmentCount page <= ix
   then Nothing
   else Just $ segmentUnsafe page ix
 
@@ -103,7 +104,7 @@ segmentUnsafe page ix =
 
 segmentPtr :: Page -> Word16 -> Maybe Word16
 segmentPtr page ix =
-  if segmentCount page < ix
+  if segmentCount page <= ix
   then Nothing
   else Just $ segmentPtrUnsafe page ix
   

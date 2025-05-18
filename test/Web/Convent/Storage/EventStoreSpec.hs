@@ -33,7 +33,11 @@ spec = describe "EventStore" $ do
     let pageWithSegment = do
           page <- addSegment emptyPage testSegment
           return page
-
+    it "should correctly calculate segment count" $ do
+      case pageWithSegment of
+        Nothing -> expectationFailure "Failed to add segment"
+        Just page -> do
+          segmentCount page `shouldBe` 1
     it "should add and retrieve segments" $ do
       case pageWithSegment of
         Nothing -> expectationFailure "Failed to add segment"
