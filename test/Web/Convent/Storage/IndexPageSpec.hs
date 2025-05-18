@@ -64,11 +64,11 @@ spec = describe "IndexPage" $ do
   describe "entry" $ do
     it "should return specific entry" $ do
       let page = BS.concat [
-            BS.pack [0,0,0,0,0,0,0,10], BS.pack [0,0,0,0,0,0,0,20],  -- first segment
-            BS.pack [0,0,0,0,0,0,0,20], BS.pack [0,0,0,0,0,0,0,30],  -- second segment
+            BS.pack [0,0,0,0,0,0,0,10], BS.pack [0,0,0,0,0,0,0,20],  -- first entry
+            BS.pack [0,0,0,0,0,0,0,20], BS.pack [0,0,0,0,0,0,0,30],  -- second entry
             BS.replicate (8192 - 32) 0]
       case fromByteString page of
         Right indexPage -> do
-          indexSegment indexPage 0 `shouldBe` IndexSegment 10 20
-          indexSegment indexPage 1 `shouldBe` IndexSegment 20 30
+          entry indexPage 0 `shouldBe` IndexEntry 10 20
+          entry indexPage 1 `shouldBe` IndexEntry 20 30
         Left err -> expectationFailure $ "Failed to create test page: " ++ show err
