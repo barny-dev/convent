@@ -1,4 +1,6 @@
-# AI Agent Guidelines for Lode Project
+# AI Agent Guidelines for Convent Project
+
+*Note: This document is located in the `lode/` directory, which serves as a rich source of information about the Convent project. The directory name "lode" refers to this location being a valuable source of information, particularly for AI agents working with the codebase.*
 
 This document provides guidance for AI agents on how to properly make changes and additions to the Lode project codebase.
 

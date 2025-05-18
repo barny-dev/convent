@@ -1,5 +1,7 @@
 
-# Lode - Event-Based Chat Platform
+# Convent - Event-Based Chat Platform
+
+*Note: This document is located in the `lode/` directory, which serves as a rich source of information about the Convent project, particularly intended for AI agents to better understand the project's architecture and goals.*
 
 ## Overview
 Lode is a messaging platform built around an event-based storage system. It implements a efficient binary storage format for chat events with indexing capabilities for fast message retrieval.
