@@ -21,16 +21,28 @@ import qualified Data.ByteString.Lazy as ByteString.Lazy
 import Data.Word (Word16)
 import Web.Convent.Util.ByteString (readW16BE)
 
+-- | Represents a page containing events with their offsets
 newtype EventsPage = EventsPage ByteString deriving (Eq)
 
 instance Show EventsPage where
   show page = "EventsPage { events: " ++ show (eventCount page) ++ ", reserve: " ++ show (reserve page) ++ " bytes }"
 
+-- | Possible errors that can occur when reading a page
 data PageReadError =
-  InvalidPageSizeError Int |
-  InvalidReservePtrError Word16 |
-  InvalidEventPtrError { offendingPtr :: Word16, offendingPtrIndex :: Word16, offendingLimit :: Word16 } deriving (Show, Eq)
+  InvalidPageSizeError Int |              -- ^ Page size is not 8192 bytes
+  InvalidReservePtrError Word16 |         -- ^ Invalid reserve pointer value
+  InvalidEventPtrError { 
+    offendingPtr :: Word16,              -- ^ The invalid event pointer
+    offendingPtrIndex :: Word16,         -- ^ Index of the invalid pointer
+    offendingLimit :: Word16             -- ^ Upper/lower limit that was violated
+  } deriving (Show, Eq)
 
+-- | Creates an empty page with no events
+emptyPage :: EventsPage
+emptyPage = EventsPage . ByteString.toStrict . ByteString.Builder.toLazyByteString $ ByteString.Builder.word16BE 2 <> ByteString.Builder.lazyByteString (ByteString.Lazy.replicate 8190 0)
+
+-- | Creates an EventsPage from a ByteString, validating the data format
+-- Returns Left with an error if the data is invalid
 fromByteString :: ByteString -> Either PageReadError EventsPage
 fromByteString rawPage = do
   let pageSize = ByteString.length rawPage
@@ -42,19 +54,44 @@ fromByteString rawPage = do
   return $ EventsPage rawPage
   where
     whenNot err cond = if cond then Right () else Left err
-    validateEventPtrs rptr limit ix ptrs  = case ptrs of
+    validateEventPtrs rptr limit ix ptrs = case ptrs of
           [] -> Right ()
           ptr:rest -> 
             if ptr >= limit then Left $ InvalidEventPtrError { offendingPtr = ptr, offendingPtrIndex = ix, offendingLimit = limit }
             else if ptr < rptr then Left $ InvalidEventPtrError { offendingPtr = ptr, offendingPtrIndex = ix, offendingLimit = rptr }
             else validateEventPtrs rptr ptr (ix + 1) rest
 
+-- | Converts an EventsPage back to its raw ByteString representation
 toByteString :: EventsPage -> ByteString
 toByteString (EventsPage rawPage) = rawPage
 
-emptyPage :: EventsPage
-emptyPage = EventsPage . ByteString.toStrict . ByteString.Builder.toLazyByteString $ ByteString.Builder.word16BE 2 <> ByteString.Builder.lazyByteString (ByteString.Lazy.replicate 8190 0)
+-- | Returns the number of events in the page
+eventCount :: EventsPage -> Word16
+eventCount page = (reservePtr page - 2) `div` 2
 
+-- | Returns the pointer to the event at the specified index
+-- Returns Nothing if the index is out of bounds
+eventPtr :: EventsPage -> Word16 -> Maybe Word16
+eventPtr page ix =
+  if eventCount page <= ix
+  then Nothing
+  else Just $ eventPtrUnsafe page ix
+
+-- | Returns the event data at the specified index
+-- Returns Nothing if the index is out of bounds
+event :: EventsPage -> Word16 -> Maybe ByteString
+event page ix =
+  if eventCount page <= ix
+  then Nothing
+  else Just $ eventUnsafe page ix
+
+-- | Returns a copy of the event data at the specified index
+-- Returns Nothing if the index is out of bounds
+eventCopy :: EventsPage -> Word16 -> Maybe ByteString
+eventCopy page ix = fmap ByteString.copy (event page ix)
+
+-- | Adds a new event to the page
+-- Returns Nothing if there isn't enough space
 addEvent :: EventsPage -> ByteString -> Maybe EventsPage
 addEvent page@(EventsPage rawPage) evt =
   if (fromIntegral $ reserve page) < ByteString.length evt + 2 then Nothing
@@ -71,6 +108,7 @@ addEvent page@(EventsPage rawPage) evt =
           ByteString.Builder.byteString evt <>
           ByteString.Builder.byteString (ByteString.drop (fromIntegral lastPtr) rawPage)
 
+-- | Returns the amount of free space in the page
 reserve :: EventsPage -> Word16
 reserve page =
   let c = eventCount page
@@ -78,36 +116,19 @@ reserve page =
       end = if c == 0 then 8192 else eventPtrUnsafe page (c - 1)
    in end - rptr
 
+-- | Returns the current reserve pointer position
 reservePtr :: EventsPage -> Word16
 reservePtr (EventsPage rawPage) = readW16BE rawPage 0
 
-eventCount :: EventsPage -> Word16
-eventCount page = (reservePtr page - 2) `div` 2
+-- | Internal function to get event pointer without bounds checking
+eventPtrUnsafe :: EventsPage -> Word16 -> Word16
+eventPtrUnsafe (EventsPage rawPage) ix =
+  readW16BE rawPage $ (fromIntegral ix) * 2 + 2
 
-eventCopy :: EventsPage -> Word16 -> Maybe ByteString
-eventCopy page ix = fmap ByteString.copy (event page ix)
-
-event :: EventsPage -> Word16 -> Maybe ByteString
-event page ix =
-  if eventCount page <= ix
-  then Nothing
-  else Just $ eventUnsafe page ix
-
+-- | Internal function to get event data without bounds checking  
 eventUnsafe :: EventsPage -> Word16 -> ByteString
 eventUnsafe page ix =
   let start = fromIntegral $ eventPtrUnsafe page ix
       end = fromIntegral $ if ix == 0 then 8192 else eventPtrUnsafe page (ix - 1)
       len = end - start
    in ByteString.take len . ByteString.drop start $ toByteString page
-
-eventPtr :: EventsPage -> Word16 -> Maybe Word16
-eventPtr page ix =
-  if eventCount page <= ix
-  then Nothing
-  else Just $ eventPtrUnsafe page ix
-  
-eventPtrUnsafe :: EventsPage -> Word16 -> Word16
-eventPtrUnsafe (EventsPage rawPage) ix =
-  readW16BE rawPage $ (fromIntegral ix) * 2 + 2
-
-
