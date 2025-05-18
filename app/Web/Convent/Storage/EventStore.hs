@@ -1,7 +1,7 @@
 module Web.Convent.Storage.EventStore 
   ( Page()
   , emptyPage
-  , PageReadError()
+  , PageReadError(..)
   , fromByteString
   , toByteString
   , segmentPtr

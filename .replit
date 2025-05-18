@@ -24,4 +24,12 @@ mode = "sequential"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "cabal update && cabal build && cabal test"
+args = "cabal update"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cabal build"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "cabal test"

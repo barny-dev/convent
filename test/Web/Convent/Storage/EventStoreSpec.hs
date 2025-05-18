@@ -1,4 +1,3 @@
-
 module Web.Convent.Storage.EventStoreSpec (spec) where
 
 import Test.Hspec
