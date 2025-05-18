@@ -23,6 +23,9 @@ import Data.Word (Word16)
 
 newtype Page = Page ByteString deriving (Eq)
 
+instance Show Page where
+  show page = "Page { segments: " ++ show (segmentCount page) ++ ", reserve: " ++ show (reserve page) ++ " bytes }"
+
 data PageReadError =
   ReadFileTooSmallError |
   InvalidPageSizeError Int |
