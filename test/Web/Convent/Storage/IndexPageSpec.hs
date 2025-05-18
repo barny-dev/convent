@@ -36,7 +36,7 @@ spec = describe "IndexPage" $ do
             BS.replicate 16 0,  -- zero segment
             BS.pack [0,0,0,0,0,0,0,30], BS.pack [0,0,0,0,0,0,0,40],  -- invalid trailing segment
             BS.replicate (8192 - 48) 0]
-      fromByteString page `shouldBe` Left (NonZeroTrailingSegmentError 2)
+      fromByteString page `shouldBe` Left (NonZeroTrailingEntryError 2)
 
   describe "entryCount" $ do
     it "should count entries correctly" $ do

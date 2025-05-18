@@ -4,9 +4,9 @@ module Web.Convent.Storage.IndexPage
   , fromByteString
   , toByteString
   , entryCount
-
+  
   , emptyPage
-
+  , IndexEntry(..)
   , entries
   , entry
   ) where
@@ -14,7 +14,6 @@ module Web.Convent.Storage.IndexPage
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Word (Word64)
-import Data.Int (Int64)
 import Web.Convent.Util.ByteString (readW64BE)
 
 -- | Represents a page in the index containing segment information
@@ -38,17 +37,11 @@ fromByteString :: ByteString -> Either IndexPageError IndexPage
 fromByteString rawPage = do
   let pageSize = ByteString.length rawPage
   (InvalidPageSizeError pageSize) `whenNot` (pageSize == 8192)
-  validateSegments rawPage 0 (0, 0)
-
--- | Creates an empty index page with no entries
-emptyPage :: IndexPage
-emptyPage = IndexPage $ ByteString.replicate 8192 0
-
-
+  validateEntries rawPage 0 (0, 0)
   return $ IndexPage rawPage
   where
     whenNot err cond = if cond then Right () else Left err
-    validateSegments bs ix (lastPage, lastEvent) =
+    validateEntries bs ix (lastPage, lastEvent) =
       if ix >= 512 then Right ()
       else do
         let offset = ix * 16
@@ -59,7 +52,7 @@ emptyPage = IndexPage $ ByteString.replicate 8192 0
           else do
             (NonAscendingOffsetError ix) `whenNot` (pageOffset > lastPage)
             (NonAscendingEventOffsetError ix) `whenNot` (eventOffset > lastEvent)
-            validateSegments bs (ix + 1) (pageOffset, eventOffset)
+            validateEntries bs (ix + 1) (pageOffset, eventOffset)
     validateTrailingZeros bs ix =
       if ix >= 512 then Right ()
       else do
@@ -68,6 +61,11 @@ emptyPage = IndexPage $ ByteString.replicate 8192 0
         let eventOffset = readW64BE bs (offset + 8)
         (NonZeroTrailingEntryError ix) `whenNot` (pageOffset == 0 && eventOffset == 0)
         validateTrailingZeros bs (ix + 1)
+
+-- | Creates an empty index page with no entries
+emptyPage :: IndexPage
+emptyPage = IndexPage $ ByteString.replicate 8192 0
+  
 
 -- | Converts an IndexPage back to its raw ByteString representation
 toByteString :: IndexPage -> ByteString
