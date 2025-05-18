@@ -128,30 +128,30 @@ Index pages are also 8192 bytes and contain fixed-size segments that map event o
 ### Index Page Format
 ```
 +----------------+----------------+----------------+---
-| Segment 1      | Segment 2      | Segment 3      | ...
+| Entry 1        | Entry 2        | Entry 3        | ...
 +----------------+----------------+----------------+---
 ```
 
 Each index page contains:
 
-1. **Fixed-size Segments** (16 bytes each)
-   - Maximum 512 segments per page (8192/16 bytes)
-   - Each segment contains:
+1. **Fixed-size Entries** (16 bytes each)
+   - Maximum 512 entries per page (8192/16 bytes)
+   - Each entry contains:
      - Page offset (8 bytes): Location of events page in store
      - Minimum event offset (8 bytes): Smallest event offset in that page
 
 2. **Zero Padding**
-   - Unused segments are zeroed
-   - First all-zero segment marks end of valid data
-   - All subsequent segments must also be zero
+   - Unused entries are zeroed
+   - First all-zero entry marks end of valid data
+   - All subsequent entries must also be zero
 
 ### Index Page Rules
 
-1. **Segment Ordering**
+1. **Entry Ordering**
    - Page offsets must be strictly ascending
    - Event offsets must be strictly ascending
-   - No gaps allowed between valid segments
-   - All segments after first zero segment must be zero
+   - No gaps allowed between valid entries
+   - All entries after first zero entry must be zero
 
 2. **Validation**
    - Page size must be exactly 8192 bytes

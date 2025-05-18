@@ -18,8 +18,8 @@ Lode is a messaging platform built around an event-based storage system. It impl
   - Provides space management functionality
 
 - **IndexPage**: Manages index pages that map event offsets to their storage locations
-  - Maintains segment information for quick event lookup
-  - Each segment contains page offset and minimum event offset
+  - Maintains index entries for quick event lookup
+  - Each entry contains page offset and minimum event offset
   - Validates index integrity (ascending offsets, proper formatting)
 
 - **EventStore**: Handles low-level file I/O operations

@@ -3,9 +3,9 @@ module Web.Convent.Storage.IndexPage
   , IndexPageError(..)
   , fromByteString
   , toByteString
-  , indexSegmentCount
-  , indexSegments
-  , indexSegment
+  , entryCount
+  , entries
+  , entry
   ) where
 
 import Data.ByteString (ByteString)
@@ -18,7 +18,7 @@ import Web.Convent.Util.ByteString (readW64BE)
 newtype IndexPage = IndexPage ByteString deriving (Eq)
 
 instance Show IndexPage where
-  show page = "IndexPage { segments: " ++ show (indexSegmentCount page) ++ " }"
+  show page = "IndexPage { segments: " ++ show (entryCount page) ++ " }"
 
 -- | Possible errors that can occur when reading an index page
 data IndexPageError =
@@ -64,9 +64,30 @@ fromByteString rawPage = do
 toByteString :: IndexPage -> ByteString
 toByteString (IndexPage rawPage) = rawPage
 
--- | Returns the number of valid segments in the index page
-indexSegmentCount :: IndexPage -> Int
-indexSegmentCount (IndexPage rawPage) = count 0
+-- | Represents an entry in the index containing page and event offset information
+data IndexEntry = IndexEntry {
+  pageOffset :: Word64,        -- ^ Offset of the page in the store
+  minimumEventOffset :: Word64 -- ^ Minimum event offset contained in the page
+} deriving (Show, Eq)
+
+-- | Returns all valid entries in the index page
+entries :: IndexPage -> [IndexEntry]
+entries page = 
+  [ e | ix <- [0..63], 
+    let e = entry page ix, 
+    pageOffset e /= 0 || minimumEventOffset e /= 0 ]
+
+-- | Returns the entry at the specified index
+entry :: IndexPage -> Int -> IndexEntry
+entry (IndexPage rawPage) ix =
+  let offset = ix * 16
+      pOffset = readW64BE rawPage offset
+      eOffset = readW64BE rawPage (offset + 8)
+   in IndexEntry { pageOffset = pOffset, minimumEventOffset = eOffset }
+
+-- | Returns the number of valid entries in the index page
+entryCount :: IndexPage -> Int
+entryCount (IndexPage rawPage) = count 0
   where
     count ix = 
       if ix >= 512 then 0
@@ -76,24 +97,3 @@ indexSegmentCount (IndexPage rawPage) = count 0
            in if pageOffset == 0 && eventOffset == 0 
               then 0 
               else 1 + count (ix + 1)
-
--- | Represents a segment in the index containing page and event offset information
-data IndexSegment = IndexSegment {
-  pageOffset :: Word64,        -- ^ Offset of the page in the store
-  minimumEventOffset :: Word64 -- ^ Minimum event offset contained in the page
-} deriving (Show, Eq)
-
--- | Returns all valid segments in the index page
-indexSegments :: IndexPage -> [IndexSegment]
-indexSegments page = 
-  [ segment | ix <- [0..63], 
-    let segment = indexSegment page ix, 
-    pageOffset segment /= 0 || minimumEventOffset segment /= 0 ]
-
--- | Returns the segment at the specified index
-indexSegment :: IndexPage -> Int -> IndexSegment
-indexSegment (IndexPage rawPage) ix =
-  let offset = ix * 16
-      pOffset = readW64BE rawPage offset
-      eOffset = readW64BE rawPage (offset + 8)
-   in IndexSegment { pageOffset = pOffset, minimumEventOffset = eOffset }
