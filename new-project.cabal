@@ -62,6 +62,7 @@ executable new-project
 
     -- Modules included in this executable, other than Main.
     other-modules:    Web.Convent.Storage.EventStore
+                    , Web.Convent.Storage.EventsPage
                     , Web.Convent.Storage.IndexPage
 
     -- LANGUAGE extensions used by modules in this package.
@@ -82,8 +83,10 @@ test-suite new-project-test
     type:             exitcode-stdio-1.0
     main-is:          Spec.hs
     other-modules:    Web.Convent.Storage.EventStoreSpec
+                    , Web.Convent.Storage.EventsPageSpec
                     , Web.Convent.Storage.IndexPageSpec
                     , Web.Convent.Storage.EventStore
+                    , Web.Convent.Storage.EventsPage
                     , Web.Convent.Storage.IndexPage
     hs-source-dirs:   test, app
     build-depends:    base ^>=4.18.2.1
