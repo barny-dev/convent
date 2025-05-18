@@ -4,7 +4,6 @@ module Web.Convent.Storage.IndexPage
   , fromByteString
   , toByteString
   , entryCount
-  
   , emptyPage
   , IndexEntry(..)
   , entries
@@ -16,91 +15,73 @@ import qualified Data.ByteString as ByteString
 import Data.Word (Word64)
 import Web.Convent.Util.ByteString (readW64BE)
 
--- | Represents a page in the index containing segment information
 newtype IndexPage = IndexPage ByteString deriving (Eq)
 
 instance Show IndexPage where
   show page = "IndexPage { segments: " ++ show (entryCount page) ++ " }"
 
--- | Possible errors that can occur when reading an index page
 data IndexPageError =
   InvalidPageSizeError Int |      -- ^ Page size is not 8192 bytes
   InvalidEntryError Int |         -- ^ Entry data is invalid
   NonZeroTrailingEntryError Int | -- ^ Found non-zero entry after a zero entry
-  NonAscendingOffsetError Int |   -- ^ Page offsets are not strictly ascending
   NonAscendingEventOffsetError Int -- ^ Event offsets are not strictly ascending
   deriving (Show, Eq)
 
--- | Creates an IndexPage from a ByteString, validating the data format
--- Returns Left with an error if the data is invalid
 fromByteString :: ByteString -> Either IndexPageError IndexPage
 fromByteString rawPage = do
   let pageSize = ByteString.length rawPage
   (InvalidPageSizeError pageSize) `whenNot` (pageSize == 8192)
-  validateEntries rawPage 0 (0, 0)
+  validateEntries rawPage 0 0
   return $ IndexPage rawPage
   where
     whenNot err cond = if cond then Right () else Left err
-    validateEntries bs ix (lastPage, lastEvent) =
-      if ix >= 512 then Right ()
+    validateEntries bs ix lastEvent =
+      if ix >= 1024 then Right ()
       else do
-        let offset = ix * 16
-        let pageOffset = readW64BE bs offset
-        let eventOffset = readW64BE bs (offset + 8)
-        if pageOffset == 0 && eventOffset == 0
+        let offset = ix * 8
+        let eventOffset = readW64BE bs offset
+        if eventOffset == 0
           then validateTrailingZeros bs (ix + 1)
           else do
-            (NonAscendingOffsetError ix) `whenNot` (pageOffset > lastPage)
             (NonAscendingEventOffsetError ix) `whenNot` (eventOffset > lastEvent)
-            validateEntries bs (ix + 1) (pageOffset, eventOffset)
+            validateEntries bs (ix + 1) eventOffset
     validateTrailingZeros bs ix =
-      if ix >= 512 then Right ()
+      if ix >= 1024 then Right ()
       else do
-        let offset = ix * 16
-        let pageOffset = readW64BE bs offset
-        let eventOffset = readW64BE bs (offset + 8)
-        (NonZeroTrailingEntryError ix) `whenNot` (pageOffset == 0 && eventOffset == 0)
+        let offset = ix * 8
+        let eventOffset = readW64BE bs offset
+        (NonZeroTrailingEntryError ix) `whenNot` (eventOffset == 0)
         validateTrailingZeros bs (ix + 1)
 
--- | Creates an empty index page with no entries
 emptyPage :: IndexPage
 emptyPage = IndexPage $ ByteString.replicate 8192 0
-  
 
--- | Converts an IndexPage back to its raw ByteString representation
 toByteString :: IndexPage -> ByteString
 toByteString (IndexPage rawPage) = rawPage
 
--- | Represents an entry in the index containing page and event offset information
-data IndexEntry = IndexEntry {
-  pageOffset :: Word64,        -- ^ Offset of the page in the store
+newtype IndexEntry = IndexEntry {
   minimumEventOffset :: Word64 -- ^ Minimum event offset contained in the page
 } deriving (Show, Eq)
 
--- | Returns all valid entries in the index page
 entries :: IndexPage -> [IndexEntry]
 entries page = 
-  [ e | ix <- [0..63], 
+  [ e | ix <- [0..1023], 
     let e = entry page ix, 
-    pageOffset e /= 0 || minimumEventOffset e /= 0 ]
+    minimumEventOffset e /= 0 ]
 
--- | Returns the entry at the specified index
 entry :: IndexPage -> Int -> IndexEntry
 entry (IndexPage rawPage) ix =
-  let offset = ix * 16
-      pOffset = readW64BE rawPage offset
-      eOffset = readW64BE rawPage (offset + 8)
-   in IndexEntry { pageOffset = pOffset, minimumEventOffset = eOffset }
+  let offset = ix * 8
+      eOffset = readW64BE rawPage offset
+   in IndexEntry { minimumEventOffset = eOffset }
 
--- | Returns the number of valid entries in the index page
 entryCount :: IndexPage -> Int
 entryCount (IndexPage rawPage) = count 0
   where
     count ix = 
-      if ix >= 512 then 0
-      else let offset = ix * 16
-               pageOffset = readW64BE rawPage offset
-               eventOffset = readW64BE rawPage (offset + 8)
-           in if pageOffset == 0 && eventOffset == 0 
+      if ix >= 1024 then 0
+      else let offset = ix * 8
+               eventOffset = readW64BE rawPage offset
+           in if eventOffset == 0 
               then 0 
               else 1 + count (ix + 1)
