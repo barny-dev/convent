@@ -35,7 +35,9 @@ data PageReadError =
     offendingPtr :: Word16,              -- ^ The invalid event pointer
     offendingPtrIndex :: Word16,         -- ^ Index of the invalid pointer
     offendingLimit :: Word16             -- ^ Upper/lower limit that was violated
-  } deriving (Show, Eq)
+  } |
+  ReadFileTooSmallError                   -- ^ File is too small to read requested page
+  deriving (Show, Eq)
 
 -- | Creates an empty page with no events
 emptyPage :: EventsPage

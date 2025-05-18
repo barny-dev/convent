@@ -57,7 +57,7 @@ fromByteString rawPage = do
         let offset = ix * 16
         let pageOffset = readW64BE bs offset
         let eventOffset = readW64BE bs (offset + 8)
-        (NonZeroTrailingSegmentError ix) `whenNot` (pageOffset == 0 && eventOffset == 0)
+        (NonZeroTrailingEntryError ix) `whenNot` (pageOffset == 0 && eventOffset == 0)
         validateTrailingZeros bs (ix + 1)
 
 -- | Converts an IndexPage back to its raw ByteString representation
