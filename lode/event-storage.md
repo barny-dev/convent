@@ -148,6 +148,7 @@ Each index page contains:
 ### Index Page Rules
 
 1. **Entry Ordering**
+   - First entry must refer to the second events page (offset=1)
    - Page offsets must be strictly ascending
    - Event offsets must be strictly ascending
    - No gaps allowed between valid entries
