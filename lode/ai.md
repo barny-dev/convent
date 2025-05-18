@@ -88,6 +88,23 @@ When making changes that affect project architecture or functionality:
 4. Document complex algorithms or non-obvious decisions
 5. Use appropriate type signatures
 
+## Refactoring Requirements
+
+When performing refactoring operations such as:
+- Renaming types or functions
+- Moving types between modules
+- Adding new error types or variants
+- Changing function signatures
+
+You must:
+1. Update all usage sites including test modules
+2. Maintain test coverage for modified functionality
+3. Update test cases to reflect new types/variants
+4. Keep test module names in sync with refactored module names
+
+Example:
+When adding `FileReadError` to `EventStore`, corresponding changes must be made in `EventStoreSpec` to test the new error cases.
+
 ## Error Handling
 
 1. Use appropriate error types (`EventPageError`, `IndexPageError`, etc.)
