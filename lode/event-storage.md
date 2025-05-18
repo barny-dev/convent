@@ -59,11 +59,10 @@ Each page consists of:
 ## Event Storage Rules
 
 1. **Event Pointer Rules**
-   - Must be greater than the reserve pointer
-   - Must be less than or equal to 8192
-   - Must point to valid event data
-   - Must be in ascending order
-   - Cannot point into pointer or reserved space
+   - Must be greater than or equal to the reserve pointer
+   - Must be strictly less than 8192 (page boundary)
+   - Must be in descending order (each pointer greater than the next)
+   - Events are stored contiguously (no gaps between events)
 
 2. **Event Data Rules**
    - Stored in reverse order from end of page
