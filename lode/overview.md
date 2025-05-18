@@ -52,7 +52,7 @@ Lode is a messaging platform built around an event-based storage system. It impl
 - **Event**: A piece of chat data (e.g., message, reaction, edit) with an offset
 - **Page**: Fixed-size block (8192 bytes) containing events or index data
 - **Offset**: Sequential identifier for events in a chat
-- **Segment**: Index entry mapping event offsets to page locations
+- **Index Entry**: Index entry mapping event offsets to page locations
 - **Event Type ID**: Binary prefix identifying how to parse an event
 
 ## Implementation Status
