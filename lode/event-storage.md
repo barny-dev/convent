@@ -135,7 +135,7 @@ Index pages are also 8192 bytes and contain fixed-size segments that map event o
 Each index page contains:
 
 1. **Fixed-size Segments** (16 bytes each)
-   - Maximum 64 segments per page (8192/16/8 bytes)
+   - Maximum 512 segments per page (8192/16 bytes)
    - Each segment contains:
      - Page offset (8 bytes): Location of events page in store
      - Minimum event offset (8 bytes): Smallest event offset in that page

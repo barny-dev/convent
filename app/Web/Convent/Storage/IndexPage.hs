@@ -1,4 +1,3 @@
-
 module Web.Convent.Storage.IndexPage
   ( IndexPage()
   , IndexPageError(..)
@@ -41,7 +40,7 @@ fromByteString rawPage = do
   where
     whenNot err cond = if cond then Right () else Left err
     validateSegments bs ix (lastPage, lastEvent) =
-      if ix >= 64 then Right () 
+      if ix >= 512 then Right ()
       else do
         let offset = ix * 16
         let pageOffset = readW64BE bs offset
@@ -53,7 +52,7 @@ fromByteString rawPage = do
             (NonAscendingEventOffsetError ix) `whenNot` (eventOffset > lastEvent)
             validateSegments bs (ix + 1) (pageOffset, eventOffset)
     validateTrailingZeros bs ix =
-      if ix >= 64 then Right ()
+      if ix >= 512 then Right ()
       else do
         let offset = ix * 16
         let pageOffset = readW64BE bs offset
@@ -70,7 +69,7 @@ indexSegmentCount :: IndexPage -> Int
 indexSegmentCount (IndexPage rawPage) = count 0
   where
     count ix = 
-      if ix >= 64 then 0
+      if ix >= 512 then 0
       else let offset = ix * 16
                pageOffset = readW64BE rawPage offset
                eventOffset = readW64BE rawPage (offset + 8)
