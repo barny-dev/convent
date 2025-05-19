@@ -65,3 +65,39 @@ spec = describe "IndexPage" $ do
           entry indexPage 0 `shouldBe` IndexEntry 20
           entry indexPage 1 `shouldBe` IndexEntry 30
         Left err -> expectationFailure $ "Failed to create test page: " ++ show err
+
+  describe "addEntry" $ do
+    it "should add entry to empty page" $ do
+      let result = addEntry emptyPage 20
+      case result of
+        Nothing -> expectationFailure "Failed to add entry to empty page"
+        Just page -> do
+          entryCount page `shouldBe` 1
+          entry page 0 `shouldBe` IndexEntry 20
+
+    it "should maintain ascending order" $ do
+      let page1 = case addEntry emptyPage 20 of
+            Nothing -> error "Failed to add first entry"
+            Just p -> p
+      let page2 = case addEntry page1 30 of
+            Nothing -> error "Failed to add second entry"
+            Just p -> p
+      entryCount page2 `shouldBe` 2
+      entries page2 `shouldBe` [IndexEntry 20, IndexEntry 30]
+
+    it "should reject non-ascending entries" $ do
+      let page = case addEntry emptyPage 20 of
+            Nothing -> error "Failed to add first entry"
+            Just p -> p
+      addEntry page 10 `shouldBe` Nothing
+
+    it "should reject entries when page is full" $ do
+      let addEntries n p = if n <= 0 then Just p else do
+            p' <- addEntry p (fromIntegral $ n * 10)
+            addEntries (n - 1) p'
+      let fullPage = addEntries 1024 emptyPage
+      case fullPage of
+        Nothing -> expectationFailure "Failed to create full page"
+        Just page -> do
+          entryCount page `shouldBe` 1024
+          addEntry page 9999 `shouldBe` Nothing

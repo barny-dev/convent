@@ -75,6 +75,37 @@ entry (IndexPage rawPage) ix =
       eOffset = readW64BE rawPage offset
    in IndexEntry { minimumEventOffset = eOffset }
 
+-- | Adds a new entry to the index page
+-- 
+-- @param page The index page to add the entry to
+-- @param eventOffset The minimum event offset for the new entry
+-- @returns Nothing if the page is full or the offset would violate ordering, Just newPage otherwise
+--
+-- The function ensures:
+-- * Event offsets remain strictly ascending
+-- * No gaps between valid entries
+-- * All entries after first zero entry remain zero
+addEntry :: IndexPage -> Word64 -> Maybe IndexPage
+addEntry page@(IndexPage rawPage) newOffset = 
+  let count = entryCount page
+      lastOffset = if count == 0 then 0 else minimumEventOffset (entry page (count - 1))
+   in if count >= 1024 || (count > 0 && newOffset <= lastOffset)
+      then Nothing
+      else Just . IndexPage . ByteString.concat $ [
+        ByteString.take (count * 8) rawPage,
+        ByteString.pack [
+          fromIntegral (newOffset `shiftR` 56),
+          fromIntegral (newOffset `shiftR` 48),
+          fromIntegral (newOffset `shiftR` 40),
+          fromIntegral (newOffset `shiftR` 32),
+          fromIntegral (newOffset `shiftR` 24),
+          fromIntegral (newOffset `shiftR` 16),
+          fromIntegral (newOffset `shiftR` 8),
+          fromIntegral newOffset
+        ],
+        ByteString.replicate (8192 - (count + 1) * 8) 0
+      ]
+
 entryCount :: IndexPage -> Int
 entryCount (IndexPage rawPage) = count 0
   where
