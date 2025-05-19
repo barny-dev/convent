@@ -86,13 +86,20 @@ entry (IndexPage rawPage) ix =
 -- * Event offsets remain strictly ascending
 -- * No gaps between valid entries
 -- * All entries after first zero entry remain zero
-addEntry :: IndexPage -> Word64 -> Maybe IndexPage
+data AddEntryError = 
+    PageFull           -- ^ No more space in index page
+  | NonAscendingOffset -- ^ New offset not higher than previous entry
+  deriving (Show, Eq)
+
+addEntry :: IndexPage -> Word64 -> Either AddEntryError IndexPage
 addEntry page@(IndexPage rawPage) newOffset = 
   let count = entryCount page
       lastOffset = if count == 0 then 0 else minimumEventOffset (entry page (count - 1))
-   in if count >= 1024 || (count > 0 && newOffset <= lastOffset)
-      then Nothing
-      else Just . IndexPage . ByteString.concat $ [
+   in if count >= 1024 
+      then Left PageFull
+      else if count > 0 && newOffset <= lastOffset
+      then Left NonAscendingOffset
+      else Right . IndexPage . ByteString.concat $ [
         ByteString.take (count * 8) rawPage,
         writeW64BE newOffset,
         ByteString.replicate (8192 - (count + 1) * 8) 0

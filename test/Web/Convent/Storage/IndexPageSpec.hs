@@ -70,34 +70,34 @@ spec = describe "IndexPage" $ do
     it "should add entry to empty page" $ do
       let result = addEntry emptyPage 20
       case result of
-        Nothing -> expectationFailure "Failed to add entry to empty page"
-        Just page -> do
+        Left err -> expectationFailure $ "Failed to add entry to empty page: " ++ show err
+        Right page -> do
           entryCount page `shouldBe` 1
           entry page 0 `shouldBe` IndexEntry 20
 
     it "should maintain ascending order" $ do
       let page1 = case addEntry emptyPage 20 of
-            Nothing -> error "Failed to add first entry"
-            Just p -> p
+            Left err -> error $ "Failed to add first entry: " ++ show err
+            Right p -> p
       let page2 = case addEntry page1 30 of
-            Nothing -> error "Failed to add second entry"
-            Just p -> p
+            Left err -> error $ "Failed to add second entry: " ++ show err
+            Right p -> p
       entryCount page2 `shouldBe` 2
       entries page2 `shouldBe` [IndexEntry 20, IndexEntry 30]
 
     it "should reject non-ascending entries" $ do
       let page = case addEntry emptyPage 20 of
-            Nothing -> error "Failed to add first entry"
-            Just p -> p
-      addEntry page 10 `shouldBe` Nothing
+            Left err -> error $ "Failed to add first entry: " ++ show err
+            Right p -> p
+      addEntry page 10 `shouldBe` Left NonAscendingOffset
 
     it "should reject entries when page is full" $ do
-      let addEntries n p = if n <= 0 then Just p else do
+      let addEntries n p = if n <= 0 then Right p else do
             p' <- addEntry p (fromIntegral $ 10241 - n * 10)
             addEntries (n - 1) p'
       let fullPage = addEntries 1024 emptyPage
       case fullPage of
-        Nothing -> expectationFailure "Failed to create full page"
-        Just page -> do
+        Left err -> expectationFailure $ "Failed to create full page: " ++ show err
+        Right page -> do
           entryCount page `shouldBe` 1024
-          addEntry page 9999 `shouldBe` Nothing
+          addEntry page 9999 `shouldBe` Left PageFull
