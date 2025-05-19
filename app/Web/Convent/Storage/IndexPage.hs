@@ -13,7 +13,7 @@ module Web.Convent.Storage.IndexPage
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Word (Word64)
-import Web.Convent.Util.ByteString (readW64BE)
+import Web.Convent.Util.ByteString (readW64BE, writeW64BE)
 
 newtype IndexPage = IndexPage ByteString deriving (Eq)
 
@@ -93,16 +93,7 @@ addEntry page@(IndexPage rawPage) newOffset =
       then Nothing
       else Just . IndexPage . ByteString.concat $ [
         ByteString.take (count * 8) rawPage,
-        ByteString.pack [
-          fromIntegral (newOffset `shiftR` 56),
-          fromIntegral (newOffset `shiftR` 48),
-          fromIntegral (newOffset `shiftR` 40),
-          fromIntegral (newOffset `shiftR` 32),
-          fromIntegral (newOffset `shiftR` 24),
-          fromIntegral (newOffset `shiftR` 16),
-          fromIntegral (newOffset `shiftR` 8),
-          fromIntegral newOffset
-        ],
+        writeW64BE newOffset,
         ByteString.replicate (8192 - (count + 1) * 8) 0
       ]
 
