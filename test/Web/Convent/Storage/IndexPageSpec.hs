@@ -93,7 +93,7 @@ spec = describe "IndexPage" $ do
 
     it "should reject entries when page is full" $ do
       let addEntries n p = if n <= 0 then Just p else do
-            p' <- addEntry p (fromIntegral $ n * 10)
+            p' <- addEntry p (fromIntegral $ 10241 - n * 10)
             addEntries (n - 1) p'
       let fullPage = addEntries 1024 emptyPage
       case fullPage of
