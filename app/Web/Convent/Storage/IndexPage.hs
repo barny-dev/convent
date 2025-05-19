@@ -8,6 +8,7 @@ module Web.Convent.Storage.IndexPage
   , IndexEntry(..)
   , entries
   , entry
+  , addEntry
   ) where
 
 import Data.ByteString (ByteString)
