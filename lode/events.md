@@ -14,14 +14,15 @@ Each event stored in an EventsPage begins with a 1-byte type identifier, followe
 This event records when a participant joins a chat. The event uses utility functions from ByteString module for consistent binary encoding/decoding. Its binary format is:
 
 ```
-+---------------+------------------+----------------------+
-| Type (1 byte) | ID (8 bytes)    | Name (up to 30 bytes)|
-+---------------+------------------+----------------------+
-     0x01         Participant ID     UTF-8 encoded name
++---------------+--------------------+------------------+----------------------+
+| Type (1 byte) | Timestamp (8 bytes)| ID (8 bytes)    | Name (up to 30 bytes)|
++---------------+--------------------+------------------+----------------------+
+     0x01           Unix timestamp     Participant ID     UTF-8 encoded name
 ```
 
 **Fields:**
 - **Type**: Fixed value of 0x01
+- **Timestamp**: 64-bit Unix timestamp in seconds
 - **ID**: 64-bit unsigned integer identifying the participant
 - **Name**: UTF-8 encoded text, maximum 30 bytes
   - Control characters are stripped
@@ -32,14 +33,15 @@ This event records when a participant joins a chat. The event uses utility funct
 This event records when a participant leaves a chat. Its binary format is:
 
 ```
-+---------------+------------------+
-| Type (1 byte) | ID (8 bytes)    |
-+---------------+------------------+
-     0x02         Participant ID
++---------------+--------------------+------------------+
+| Type (1 byte) | Timestamp (8 bytes)| ID (8 bytes)    |
++---------------+--------------------+------------------+
+     0x02           Unix timestamp     Participant ID
 ```
 
 **Fields:**
 - **Type**: Fixed value of 0x02
+- **Timestamp**: 64-bit Unix timestamp in seconds
 - **ID**: 64-bit unsigned integer identifying the participant who left
 
 ## Event Storage
