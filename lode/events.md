@@ -11,7 +11,7 @@ Each event stored in an EventsPage begins with a 1-byte type identifier, followe
 
 ### Participant Joined (0x01)
 
-This event records when a participant joins a chat. Its binary format is:
+This event records when a participant joins a chat. The event uses utility functions from ByteString module for consistent binary encoding/decoding. Its binary format is:
 
 ```
 +---------------+------------------+----------------------+

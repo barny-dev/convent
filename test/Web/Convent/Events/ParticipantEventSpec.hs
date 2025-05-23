@@ -1,9 +1,9 @@
 
 {-# LANGUAGE OverloadedStrings #-}
-module Web.Convent.Events.ParticipantEventSpec (spec) where
+module Web.Convent.Events.ParticipantJoinedEventSpec (spec) where
 
 import Test.Hspec
-import Web.Convent.Events.ParticipantEvent
+import Web.Convent.Events.ParticipantJoinedEvent
 import Data.Word (Word64)
 import qualified Data.ByteString as BS
 import qualified Data.Text as Text
@@ -20,8 +20,8 @@ spec = describe "ParticipantEvent" $ do
 
   describe "encodeParticipantJoined" $ do
     it "should encode event with correct format" $ do
-      let event = ParticipantJoinedEvent 42 "test"
-          encoded = encodeParticipantJoined event
+      let event = Event 42 "test"
+          encoded = encode event
       BS.index encoded 0 `shouldBe` 0x01  -- event type
       BS.length encoded `shouldBe` 13     -- 1 + 8 + 4 bytes
 
