@@ -90,6 +90,10 @@ test-suite new-project-test
                     , Web.Convent.Storage.EventsPage
                     , Web.Convent.Storage.IndexPage
                     , Web.Convent.Util.ByteString
+                    , Web.Convent.Events.ParticipantEvent
+                    , Web.Convent.Events.ParticipantJoinedEvent
+                    , Web.Convent.Events.ParticipantLeftEvent
+                    , Web.Convent.Events.MessageSubmittedEvent
     hs-source-dirs:   test, app
     build-depends:    base ^>=4.18.2.1
                     , bytestring

@@ -44,6 +44,25 @@ This event records when a participant leaves a chat. Its binary format is:
 - **Timestamp**: 64-bit Unix timestamp in seconds
 - **ID**: 64-bit unsigned integer identifying the participant who left
 
+### Message Submitted (0x03)
+
+This event records when a participant sends a message. Its binary format is:
+
+```
++---------------+--------------------+------------------+----------------------+
+| Type (1 byte) | Timestamp (8 bytes)| ID (8 bytes)    | Message (≤1000 bytes)|
++---------------+--------------------+------------------+----------------------+
+     0x03           Unix timestamp     Participant ID     UTF-8 encoded text
+```
+
+**Fields:**
+- **Type**: Fixed value of 0x03
+- **Timestamp**: 64-bit Unix timestamp in seconds
+- **ID**: 64-bit unsigned integer identifying the message sender
+- **Message**: UTF-8 encoded text, maximum 1000 bytes
+  - Control characters are stripped
+  - Messages exceeding 1000 bytes are truncated
+
 ## Event Storage
 
 Events are stored in EventsPages (8192 bytes each) as detailed in [event-storage.md](event-storage.md). The page structure enables:
