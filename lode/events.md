@@ -27,6 +27,21 @@ This event records when a participant joins a chat. The event uses utility funct
   - Control characters are stripped
   - Names exceeding 30 bytes are truncated
 
+### Participant Left (0x02)
+
+This event records when a participant leaves a chat. Its binary format is:
+
+```
++---------------+------------------+
+| Type (1 byte) | ID (8 bytes)    |
++---------------+------------------+
+     0x02         Participant ID
+```
+
+**Fields:**
+- **Type**: Fixed value of 0x02
+- **ID**: 64-bit unsigned integer identifying the participant who left
+
 ## Event Storage
 
 Events are stored in EventsPages (8192 bytes each) as detailed in [event-storage.md](event-storage.md). The page structure enables:
