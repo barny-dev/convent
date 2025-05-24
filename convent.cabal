@@ -1,0 +1,64 @@
+cabal-version:      3.4
+name:               convent
+version:            0.1.0.0
+-- A short (one-line) description of the package.
+-- synopsis:
+-- A longer description of the package.
+-- description:
+license:            MIT
+license-file:       LICENSE
+-- The package author(s).
+author:             Barnaba Piotrowski <barnaba.piotrowski@gmail.com>
+-- An email address to which users can send suggestions, bug reports, and patches.
+maintainer:         
+-- A copyright notice.
+-- copyright:
+build-type:         Simple
+extra-doc-files:    CHANGELOG.md
+-- extra-source-files:
+
+common warnings
+    ghc-options: -Wall
+
+library
+    hs-source-dirs:   lib
+    exposed-modules:  Web.Convent.Storage.EventStore
+                    , Web.Convent.Storage.EventsPage
+                    , Web.Convent.Storage.IndexPage
+                    , Web.Convent.Util.ByteString
+                    , Web.Convent.Events.ParticipantJoinedEvent
+                    , Web.Convent.Events.ParticipantLeftEvent
+                    , Web.Convent.Events.MessageSubmittedEvent
+    build-depends:    base ^>=4.18.2.1
+                    , bytestring
+                    , text
+      
+executable convent-exe
+    import:           warnings
+    main-is:          Main.hs
+    -- other-modules:
+    -- other-extensions:
+    build-depends:    base ^>=4.18.2.1
+                    , convent
+    hs-source-dirs:   app
+    default-language: Haskell2010
+
+test-suite convent-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Spec.hs
+    other-modules:    Web.Convent.Storage.EventStoreSpec
+                    , Web.Convent.Storage.EventsPageSpec
+                    , Web.Convent.Storage.IndexPageSpec
+                    , Web.Convent.Events.ParticipantJoinedEventSpec
+                    , Web.Convent.Events.ParticipantLeftEventSpec
+                    , Web.Convent.Events.MessageSubmittedEventSpec
+    hs-source-dirs:   test
+    build-depends:    base ^>=4.18.2.1
+                    , convent
+                    , bytestring
+                    , text
+                    , hspec == 2.11.8
+                    , temporary
+                    , directory
+    default-language: Haskell2010
