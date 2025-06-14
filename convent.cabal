@@ -25,6 +25,7 @@ library
     exposed-modules:  Web.Convent.Storage.EventStore
                     , Web.Convent.Storage.EventsPage
                     , Web.Convent.Storage.IndexPage
+                    , Web.Convent.Storage.ChatStore
                     , Web.Convent.Util.ByteString
                     , Web.Convent.Events.ParticipantJoinedEvent
                     , Web.Convent.Events.ParticipantLeftEvent
@@ -32,6 +33,9 @@ library
     build-depends:    base ^>=4.18.2.1
                     , bytestring
                     , text
+                    , transformers
+                    , containers
+                    , uuid
       
 executable convent-exe
     import:           warnings
