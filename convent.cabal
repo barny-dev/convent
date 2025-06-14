@@ -24,8 +24,8 @@ library
     hs-source-dirs:   lib
     exposed-modules:  Web.Convent.Storage.EventStore
                     , Web.Convent.Storage.EventsPage
+                    , Web.Convent.Storage.FilePage
                     , Web.Convent.Storage.IndexPage
-                    , Web.Convent.Storage.ChatStore
                     , Web.Convent.Util.ByteString
                     , Web.Convent.Events.ParticipantJoinedEvent
                     , Web.Convent.Events.ParticipantLeftEvent
@@ -36,7 +36,7 @@ library
                     , transformers
                     , containers
                     , uuid
-      
+
 executable convent-exe
     import:           warnings
     main-is:          Main.hs
@@ -53,6 +53,7 @@ test-suite convent-test
     main-is:          Spec.hs
     other-modules:    Web.Convent.Storage.EventStoreSpec
                     , Web.Convent.Storage.EventsPageSpec
+                    , Web.Convent.Storage.FilePageSpec
                     , Web.Convent.Storage.IndexPageSpec
                     , Web.Convent.Events.ParticipantJoinedEventSpec
                     , Web.Convent.Events.ParticipantLeftEventSpec
