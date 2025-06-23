@@ -26,6 +26,7 @@ library
                     , Web.Convent.Storage.EventsPage
                     , Web.Convent.Storage.FilePage
                     , Web.Convent.Storage.IndexPage
+                    , Web.Convent.Storage.ChatStore
                     , Web.Convent.Util.ByteString
                     , Web.Convent.Events.ParticipantJoinedEvent
                     , Web.Convent.Events.ParticipantLeftEvent
