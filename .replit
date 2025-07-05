@@ -2,7 +2,6 @@
 # so forking forgets everything. That's why we're doing cabal update here.
 run = "cabal update && { echo 'putStrLn \"Hello world!\"' ; cat - ; } | exec cabal repl"
 entrypoint = "app/Main.hs"
-modules = ["haskell-ghc9.6"]
 
 [nix]
 channel = "stable-24_05"
