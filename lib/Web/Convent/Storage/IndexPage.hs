@@ -15,6 +15,7 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Word (Word64)
 import Web.Convent.Util.ByteString (readW64BE, writeW64BE)
+import Web.Convent.Storage.FilePage (FilePage(..), ReadError(..), WriteError(..))
 
 newtype IndexPage = IndexPage ByteString deriving (Eq)
 
@@ -115,4 +116,21 @@ entryCount (IndexPage rawPage) = count 0
            in if eventOffset == 0 
               then 0 
               else 1 + count (ix + 1)
+
+instance FilePage IndexPage where
+  data FilePageLoadError IndexPage = IndexPageLoadError IndexPageError
+    deriving (Show, Eq)
+  
+  data FilePageSaveError IndexPage = IndexPageSaveError
+    deriving (Show, Eq)
+  
+  toByteString page = Right $ toByteString page
+  
+  fromByteString bs = case fromByteString bs of
+    Left err -> Left $ IndexPageLoadError err
+    Right page -> Right page
+  
+  mapWriteError _ = IndexPageSaveError
+  
+  mapReadError _ = IndexPageLoadError (InvalidPageSizeError 0)
               
