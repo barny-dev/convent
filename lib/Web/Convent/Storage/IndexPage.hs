@@ -115,3 +115,4 @@ entryCount (IndexPage rawPage) = count 0
            in if eventOffset == 0 
               then 0 
               else 1 + count (ix + 1)
+              
