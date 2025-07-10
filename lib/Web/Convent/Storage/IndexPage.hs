@@ -16,7 +16,6 @@ import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import Data.Word (Word64)
 import Web.Convent.Util.ByteString (readW64BE, writeW64BE)
-import Web.Convent.Storage.FilePage (FilePage (..))
 import Web.Convent.Storage.FilePage qualified as FilePage
 
 newtype IndexPage = IndexPage ByteString deriving (Eq)
