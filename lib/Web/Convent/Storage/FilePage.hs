@@ -1,4 +1,5 @@
 {-# LANGUAGE TypeFamilies, AllowAmbiguousTypes, GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 -- | Low-level file page I/O operations for fixed-size page storage.
 --
 -- This module provides utilities for reading and writing fixed-size pages
@@ -11,6 +12,8 @@ module Web.Convent.Storage.FilePage
   , FilePage(..)
   , Index(..)
   , Size(..)
+  , load
+  , save
   ) where
 
 import Prelude hiding (read, IOError)
@@ -112,17 +115,28 @@ class FilePage a where
   
   -- | Map low-level read errors to page-specific load errors.
   mapReadError :: ReadError -> FilePageLoadError a
-
--- | Load a typed page from a file handle.
---
--- This is a convenience function that combines 'read' with 'fromByteString'
--- to load a strongly-typed page from storage.
-loadPage :: FilePage a => IO.Handle -> Ptr -> IO (Either (FilePageLoadError a) a)
-loadPage fh ptr = do
+  -- | Load a typed page from a file handle.
+  --
+  -- This is a convenience function that combines 'read' with 'fromByteString'
+  -- to load a strongly-typed page from storage.
+  load :: IO.Handle -> Ptr -> IO (Either (FilePageLoadError a) a)
+  load fh ptr = do
     result <- read fh ptr
     return $! case result of
         Left err -> Left $! mapReadError err
         Right byteData -> fromByteString $! byteData
+  -- | Save a typed page to a file handle
+  -- This is a convenience function that combines 'write' with 'toByteString'
+  -- to save a strongly-typed page to storage
+  save :: IO.Handle -> Ptr -> a -> IO (Either (FilePageSaveError a) ())
+  save fh ptr page = do
+    case toByteString page of
+      Left err -> return $ Left err
+      Right bs -> do 
+        result <- write fh ptr bs
+        return $ case result of
+          Left err' -> Left $ mapWriteError err'
+          Right () -> Right ()
 
 wrapIOError :: (Prelude.IOError -> e) -> IO (Either e a) -> IO (Either e a)
 wrapIOError f io = handle (\err -> return $ Left $! f err) $! io

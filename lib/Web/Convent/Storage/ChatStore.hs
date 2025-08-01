@@ -17,10 +17,12 @@ import Data.UUID (UUID)
 import Data.Word (Word64)
 import System.IO (Handle, hFileSize)
 import Web.Convent.Storage.IndexPage (IndexPage)
+import Data.Maybe (maybe)
 import qualified Web.Convent.Storage.IndexPage as IndexPage
-import Web.Convent.Storage.EventsPage
+import Web.Convent.Storage.EventsPage (EventsPage)
 import qualified Web.Convent.Storage.EventsPage as EventsPage
 import Web.Convent.Storage.EventStore
+import qualified Web.Convent.Storage.FilePage as FilePage
 
 -- | Represents data associated with a single chat
 data ChatData = ChatData
@@ -43,16 +45,16 @@ initChatData indexHandle eventsHandle = runExceptT $ do
     let indexPageCount = fromIntegral (indexSize `div` 8192)
         eventsPageCount = fromIntegral (eventsSize `div` 8192)  
   -- Read last index page if available
-    maybeLastIndexPage <- if indexPageCount > 0
+    maybeLastIndexPage :: Maybe IndexPage <- if indexPageCount > 0
                           then withExceptT (const IndexFileCorrupted) $
                                fmap Just . ExceptT $
-                               IndexPage.readPage indexHandle (indexPageCount - 1)
+                               FilePage.load indexHandle (FilePage.Index (indexPageCount - 1), FilePage.Size 8192)
                           else return Nothing
   -- Read last events page if available
-    maybeLastEventsPage <- if eventsPageCount > 0
+    maybeLastEventsPage :: Maybe EventsPage <- if eventsPageCount > 0
                            then withExceptT (const EventsFileCorrupted) $
                                 fmap Just . ExceptT $
-                                EventsPage.readPage eventsHandle (eventsPageCount - 1)
+                                FilePage.load eventsHandle (FilePage.Index (eventsPageCount - 1), FilePage.Size 8192)
                            else return Nothing
   -- Cache the pages
     let cachedIndexPages = case maybeLastIndexPage of
@@ -95,30 +97,15 @@ withChatLock (ChatStore mvar) chatId action = do
 
 -- | Returns the highest event offset in a chat. TODO: this is AI generated garbage, fix it.
 getHighestEventOffset :: ChatStore -> UUID -> IO (Either String Word64)
-getHighestEventOffset store chatId = withChatLock store chatId $ \ChatData{..} -> do
-  -- Start from a high index and work backwards to find last non-empty page
-  let findLastIndexPage n = 
-        if n < 0 
-        then return $ Left "No events found"
-        else do
-          result <- readPage indexHandle n
-          case result of
-            Left _ -> findLastIndexPage (n - 1)
-            Right page -> 
-              if entryCount page == 0
-              then findLastIndexPage (n - 1)
-              else return $ Right (n, page)
-              
-  indexResult <- findLastIndexPage 1024  -- Max possible index pages
-  case indexResult of
-    Left err -> return $ Left err
-    Right (pageNum, indexPage) -> do
-      let count = entryCount indexPage
-          lastEntry = entry indexPage (count - 1)
-          baseOffset = minimumEventOffset lastEntry
-      -- Read the events page this entry points to
-      eventsResult <- readPage eventsHandle pageNum
-      case eventsResult of
-        Left err -> return $ Left $ "Failed to read events page: " ++ show err
-        Right eventsPage -> 
-          return $ Right $ baseOffset + (fromIntegral $ eventCount eventsPage)
+getHighestEventOffset store chatId = withChatLock store chatId $
+  \ChatData { indexPageCount = ixPgCnt, cachedIndexPages = ixPgs, cachedEventPages = evPgs, .. } -> runExceptT $ do
+    lastIndexPageOffset <- if ixPgCnt < 1 then throwE "illegal: missing index" else return (ixPgCnt - 1)
+    lastIndexPage <- maybe (throwE "illegal: last index page not loaded") return (Map.lookup lastIndexPageOffset ixPgs)
+    let indexPageEntryCount = IndexPage.entryCount lastIndexPage
+    (eventPageOffset, baseEventOffset) <- case (lastIndexPageOffset, indexPageEntryCount) of
+      (0, 0) -> return (0, 0)
+      (n, 0) -> throwE "illegal: empty last index page"
+      _ -> let lastEntry = IndexPage.entry lastIndexPage (indexPageEntryCount - 1)
+            in return (indexPageEntryCount - 1 + (lastIndexPageOffset * 1024), IndexPage.minimumEventOffset lastEntry)
+    lastEventPage <- maybe (throwE "illegal: last event page not loaded") return (Map.lookup eventPageOffset evPgs)
+    return . fromIntegral $ baseEventOffset + (fromIntegral $ EventsPage.eventCount lastEventPage) - 1

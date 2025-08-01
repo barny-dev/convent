@@ -23,15 +23,17 @@ common warnings
 library
     hs-source-dirs:   lib
     exposed-modules:  Web.Convent.Storage.EventStore
+                    , Web.Convent.Error
                     , Web.Convent.Storage.EventsPage
                     , Web.Convent.Storage.FilePage
+                    , Web.Convent.Storage.PageOps
                     , Web.Convent.Storage.IndexPage
-                    , Web.Convent.Storage.ChatStore
+                    , Web.Convent.Storage.ChatStore        
                     , Web.Convent.Util.ByteString
                     , Web.Convent.Events.ParticipantJoinedEvent
                     , Web.Convent.Events.ParticipantLeftEvent
                     , Web.Convent.Events.MessageSubmittedEvent
-    build-depends:    base == 4.18.2.1
+    build-depends:    base < 4.19 && >= 4.18.2.1
                     , bytestring == 0.12.1.0
                     , text == 2.1.1
                     , transformers == 0.6.1.1
@@ -44,7 +46,7 @@ executable convent-exe
     main-is:          Main.hs
     -- other-modules:
     -- other-extensions:
-    build-depends:    base == 4.18.2.1
+    build-depends:    base < 4.19 && >= 4.18.2.1
                     , convent
     hs-source-dirs:   app
     default-language: GHC2021
@@ -62,7 +64,7 @@ test-suite convent-test
                     , Web.Convent.Events.MessageSubmittedEventSpec
     hs-source-dirs:   test
     build-depends:    convent
-                    , base == 4.18.2.1
+                    , base < 4.19 && >= 4.18.2.1
                     , bytestring == 0.12.1.0
                     , text == 2.1.1
                     , hspec == 2.11.8

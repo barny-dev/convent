@@ -2,11 +2,14 @@
 module Web.Convent.Storage.IndexPage
   ( IndexPage()
   , IndexPageError(..)
+  , LoadError (..)
+  , SaveError (..)
   , fromByteString
   , toByteString
   , entryCount
   , emptyPage
-  , IndexEntry(..)
+  , IndexEntry (..)
+  , AddEntryError (..)
   , entries
   , entry
   , addEntry
@@ -17,6 +20,7 @@ import qualified Data.ByteString as ByteString
 import Data.Word (Word64)
 import Web.Convent.Util.ByteString (readW64BE, writeW64BE)
 import Web.Convent.Storage.FilePage qualified as FilePage
+import Web.Convent.Storage.FilePage (FilePage)
 
 newtype IndexPage = IndexPage ByteString deriving (Eq)
 
@@ -118,22 +122,21 @@ entryCount (IndexPage rawPage) = count 0
               then 0 
               else 1 + count (ix + 1)
 
-data LoadError = FormatLoadError IndexPageError | ReadLoadError FilePage.ReadError deriving (Show, Eq)
+type LoadError = FilePage.FilePageLoadError IndexPage
 
-data SaveError = FormatSaveError IndexPageError | WriteSaveError FilePage.WriteError deriving (Show, Eq)
+type SaveError = FilePage.FilePageSaveError IndexPage
 
 instance FilePage IndexPage where
-  data FilePageLoadError IndexPage = LoadError
+  data FilePageLoadError IndexPage = 
+    FormatLoadError IndexPageError |
+    ReadLoadError FilePage.ReadError deriving (Show, Eq)
   
-  data FilePageSaveError IndexPage = SaveError
-  
-  toByteString page = Right $ (toByteString) page
-  
+  data FilePageSaveError IndexPage = 
+    FormatSaveError IndexPageError |
+    WriteSaveError FilePage.WriteError deriving (Show, Eq)
+  toByteString page = Right $ toByteString page
   fromByteString bs = case fromByteString bs of
     Left err -> Left $ FormatLoadError err
     Right page -> Right page
-  
-  mapWriteError err = WriteSaveError err
-  
-  mapReadError err = ReadLoadError err
-              
+  mapWriteError = WriteSaveError
+  mapReadError = ReadLoadError

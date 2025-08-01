@@ -1,4 +1,4 @@
-
+{-# LANGUAGE TypeFamilies #-}
 module Web.Convent.Storage.EventsPage 
   ( EventsPage()
   , emptyPage
@@ -20,6 +20,8 @@ import qualified Data.ByteString.Builder as ByteString.Builder
 import qualified Data.ByteString.Lazy as ByteString.Lazy
 import Data.Word (Word16)
 import Web.Convent.Util.ByteString (readW16BE)
+import Web.Convent.Storage.FilePage (FilePage)
+import qualified Web.Convent.Storage.FilePage as FilePage
 
 -- | Represents a page containing events with their offsets
 newtype EventsPage = EventsPage ByteString deriving (Eq)
@@ -133,3 +135,20 @@ eventUnsafe page ix =
       end = fromIntegral $ if ix == 0 then 8192 else eventPtrUnsafe page (ix - 1)
       len = end - start
    in ByteString.take len . ByteString.drop start $ toByteString page
+
+type LoadError = FilePage.FilePageLoadError EventsPage
+
+type SaveError = FilePage.FilePageSaveError EventsPage
+
+instance FilePage EventsPage where
+  data FilePageLoadError EventsPage = 
+    FormatLoadError PageReadError |
+    ReadLoadError FilePage.ReadError deriving (Show, Eq)
+  data FilePageSaveError EventsPage = 
+    WriteSaveError FilePage.WriteError deriving (Show, Eq)
+  toByteString page = Right $ toByteString page
+  fromByteString bs = case fromByteString bs of
+    Left err -> Left $ FormatLoadError err
+    Right page -> Right page
+  mapWriteError = WriteSaveError
+  mapReadError = ReadLoadError
