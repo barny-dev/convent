@@ -1,0 +1,5 @@
+packages: .
+
+-- Allow newer versions of template-haskell to work with uuid-types
+-- This is needed for GHC 9.14+ which comes with template-haskell 2.24
+allow-newer: uuid-types:template-haskell
