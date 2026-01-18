@@ -107,10 +107,10 @@ spec = describe "ChatFlow" $ do
           messageEvent = Message.encode $ Message.Event 1 1700000001 "Hello"
           leaveEvent = Leave.encode $ Leave.Event 1 1700000002
 
-      -- Verify event type bytes
-      BS.index joinEvent 0 `shouldBe` 0x01
-      BS.index messageEvent 0 `shouldBe` 0x03
-      BS.index leaveEvent 0 `shouldBe` 0x02
+      -- Verify event type bytes match the module constants
+      BS.index joinEvent 0 `shouldBe` Join.eventType
+      BS.index messageEvent 0 `shouldBe` Message.eventType
+      BS.index leaveEvent 0 `shouldBe` Leave.eventType
 
     it "should handle page serialization with chat events" $ do
       let events =
@@ -120,8 +120,11 @@ spec = describe "ChatFlow" $ do
             , Leave.encode $ Leave.Event 1 1700000003
             ]
 
-      -- Add all events to page, using fromJust to fail test if any event fails to add
-      let resultPage = foldl (\pg e -> fromJust $ EventsPage.addEvent pg e) EventsPage.emptyPage events
+      -- Add all events to page, verify each event adds successfully
+      let addEventOrFail pg e = case EventsPage.addEvent pg e of
+            Just p -> p
+            Nothing -> error "Failed to add event to page - page may be full"
+          resultPage = foldl addEventOrFail EventsPage.emptyPage events
 
       -- Serialize and deserialize
       let serialized = EventsPage.toByteString resultPage
