@@ -18,7 +18,7 @@ spec = describe "ChatFlow" $ do
       -- Create events for a chat session
       let participantId = 12345
           timestamp1 = 1700000000
-          timestamp2 = 1700000001  
+          timestamp2 = 1700000001
           timestamp3 = 1700000002
 
           -- Participant joins the chat
@@ -113,19 +113,15 @@ spec = describe "ChatFlow" $ do
       BS.index leaveEvent 0 `shouldBe` 0x02
 
     it "should handle page serialization with chat events" $ do
-      let events = 
+      let events =
             [ Join.encode $ Join.Event 1 1700000000 "User1"
             , Message.encode $ Message.Event 1 1700000001 "Message 1"
             , Message.encode $ Message.Event 1 1700000002 "Message 2"
             , Leave.encode $ Leave.Event 1 1700000003
             ]
 
-      -- Add all events to page
-      let addEvents pg [] = pg
-          addEvents pg (e:es) = case EventsPage.addEvent pg e of
-            Nothing -> pg
-            Just p -> addEvents p es
-          resultPage = addEvents EventsPage.emptyPage events
+      -- Add all events to page, using fromJust to fail test if any event fails to add
+      let resultPage = foldl (\pg e -> fromJust $ EventsPage.addEvent pg e) EventsPage.emptyPage events
 
       -- Serialize and deserialize
       let serialized = EventsPage.toByteString resultPage
