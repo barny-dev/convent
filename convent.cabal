@@ -62,6 +62,7 @@ test-suite convent-test
                     , Web.Convent.Events.ParticipantJoinedEventSpec
                     , Web.Convent.Events.ParticipantLeftEventSpec
                     , Web.Convent.Events.MessageSubmittedEventSpec
+                    , Web.Convent.Events.ChatFlowSpec
     hs-source-dirs:   test
     build-depends:    convent
                     , base >= 4.18
