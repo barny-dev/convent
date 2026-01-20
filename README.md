@@ -52,12 +52,13 @@ Run the test suite with:
 cabal test
 ```
 
-All 38 tests should pass, covering:
+All 42 tests should pass, covering:
 - EventStore operations
 - EventsPage format and operations
 - IndexPage structure and validation
 - FilePage I/O operations
 - Event encoding/decoding
+- ChatFlow integration tests (end-to-end event flow scenarios)
 
 ## Running
 
