@@ -63,14 +63,16 @@ spec = describe "API" $ do
         let testEvent = BS.pack [0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 
                                  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 
                                  0x41, 0x6C, 0x69, 0x63, 0x65] -- "Alice"
-        appendEventToFile indexPath eventsPath testEvent
+        result1 <- appendEventToFile indexPath eventsPath testEvent
+        result1 `shouldBe` Right ()
         
         -- Calculate offset after adding event (should be 1)
         offset1 <- calculateNextOffset indexPath eventsPath
         offset1 `shouldBe` 1
         
         -- Add another event
-        appendEventToFile indexPath eventsPath testEvent
+        result2 <- appendEventToFile indexPath eventsPath testEvent
+        result2 `shouldBe` Right ()
         
         -- Calculate offset (should be 2)
         offset2 <- calculateNextOffset indexPath eventsPath
@@ -90,7 +92,8 @@ spec = describe "API" $ do
         let largeEvent = BS.pack ([0x03] ++ replicate 16 0x00 ++ replicate 500 0x41)
         
         -- Add 15 events (should stay in one page, ~7500 bytes)
-        mapM_ (\_ -> appendEventToFile indexPath eventsPath largeEvent) [1..15 :: Int]
+        results1 <- mapM (\_ -> appendEventToFile indexPath eventsPath largeEvent) [1..15 :: Int]
+        all (\r -> r == Right ()) results1 `shouldBe` True
         
         -- Check we still have one page
         eventsContent1 <- BS.readFile eventsPath
@@ -98,7 +101,8 @@ spec = describe "API" $ do
         numPages1 `shouldBe` 1
         
         -- Add more events to trigger second page
-        mapM_ (\_ -> appendEventToFile indexPath eventsPath largeEvent) [16..20 :: Int]
+        results2 <- mapM (\_ -> appendEventToFile indexPath eventsPath largeEvent) [16..20 :: Int]
+        all (\r -> r == Right ()) results2 `shouldBe` True
         
         -- Check we now have multiple pages
         eventsContent2 <- BS.readFile eventsPath

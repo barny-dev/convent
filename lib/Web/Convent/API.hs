@@ -49,8 +49,15 @@ import qualified Web.Convent.Events.MessageSubmittedEvent as MessageSubmittedEve
 newtype ChatId = ChatId UUID
   deriving (Eq, Show, Generic)
 
-instance ToJSON ChatId
-instance FromJSON ChatId
+instance ToJSON ChatId where
+  toJSON (ChatId uuid) = toJSON (UUID.toText uuid)
+
+instance FromJSON ChatId where
+  parseJSON v = do
+    txt <- parseJSON v
+    case UUID.fromText txt of
+      Just uuid -> return (ChatId uuid)
+      Nothing -> fail "Invalid UUID format"
 
 instance ToHttpApiData ChatId where
   toUrlPiece (ChatId uuid) = UUID.toText uuid
@@ -166,60 +173,72 @@ createChat _store = do
 
 -- | Join a chat
 joinChat :: ChatStore -> ChatId -> JoinChatRequest -> Handler JoinChatResponse
-joinChat _store (ChatId uuid) JoinChatRequest{..} = do
+joinChat store (ChatId uuid) JoinChatRequest{..} = do
   let chatDir = "chats/" ++ UUID.toString uuid
   
   -- Check if chat exists
   exists <- liftIO $ doesDirectoryExist chatDir
   unless exists $ throwError err404 { errBody = "Chat not found" }
   
-  -- Generate participant ID (simple: use timestamp as ID)
-  timestamp <- liftIO getCurrentTimestamp
-  let pid = timestamp
-  
   let eventsPath = chatDir ++ "/events.dat"
       indexPath = chatDir ++ "/index.dat"
   
-  -- Calculate next event offset using index
-  eventOffset <- liftIO $ calculateNextOffset indexPath eventsPath
-  
-  -- Create and append ParticipantJoinedEvent
-  let event = ParticipantJoinedEvent.Event
-        { ParticipantJoinedEvent.participantId = pid
-        , ParticipantJoinedEvent.timestamp = timestamp
-        , ParticipantJoinedEvent.participantName = participantName
-        }
-  
-  liftIO $ appendEventToFile indexPath eventsPath (ParticipantJoinedEvent.encode event)
+  -- Serialize writes per chat to avoid concurrent offset races
+  (pid, eventOffset) <- liftIO $
+    ChatStore.withChatLock store uuid $ \_ -> do
+      -- Generate participant ID with microsecond precision to avoid collisions
+      timestamp <- getCurrentTimestamp
+      let pid = timestamp
+      
+      -- Calculate next event offset using index
+      eventOffset <- calculateNextOffset indexPath eventsPath
+      
+      -- Create and append ParticipantJoinedEvent
+      let event = ParticipantJoinedEvent.Event
+            { ParticipantJoinedEvent.participantId = pid
+            , ParticipantJoinedEvent.timestamp = timestamp
+            , ParticipantJoinedEvent.participantName = participantName
+            }
+      
+      result <- appendEventToFile indexPath eventsPath (ParticipantJoinedEvent.encode event)
+      case result of
+        Left err -> error $ "Failed to append event: " ++ err
+        Right () -> return (pid, eventOffset)
   
   return $ JoinChatResponse pid eventOffset
 
 -- | Post a message to a chat
 postMessage :: ChatStore -> ChatId -> PostMessageRequest -> Handler PostMessageResponse
-postMessage _store (ChatId uuid) PostMessageRequest{..} = do
+postMessage store (ChatId uuid) PostMessageRequest{..} = do
   let chatDir = "chats/" ++ UUID.toString uuid
   
   -- Check if chat exists
   exists <- liftIO $ doesDirectoryExist chatDir
   unless exists $ throwError err404 { errBody = "Chat not found" }
   
-  -- Get current timestamp
-  timestamp <- liftIO getCurrentTimestamp
-  
   let eventsPath = chatDir ++ "/events.dat"
       indexPath = chatDir ++ "/index.dat"
   
-  -- Calculate next event offset using index
-  eventOffsetValue <- liftIO $ calculateNextOffset indexPath eventsPath
-  
-  -- Create and append MessageSubmittedEvent
-  let event = MessageSubmittedEvent.Event
-        { MessageSubmittedEvent.participantId = messageParticipantId
-        , MessageSubmittedEvent.timestamp = timestamp
-        , MessageSubmittedEvent.message = messageText
-        }
-  
-  liftIO $ appendEventToFile indexPath eventsPath (MessageSubmittedEvent.encode event)
+  -- Serialize writes per chat to avoid concurrent offset races
+  eventOffsetValue <- liftIO $
+    ChatStore.withChatLock store uuid $ \_ -> do
+      -- Get current timestamp
+      timestamp <- getCurrentTimestamp
+      
+      -- Calculate next event offset using index
+      eventOffset <- calculateNextOffset indexPath eventsPath
+      
+      -- Create and append MessageSubmittedEvent
+      let event = MessageSubmittedEvent.Event
+            { MessageSubmittedEvent.participantId = messageParticipantId
+            , MessageSubmittedEvent.timestamp = timestamp
+            , MessageSubmittedEvent.message = messageText
+            }
+      
+      result <- appendEventToFile indexPath eventsPath (MessageSubmittedEvent.encode event)
+      case result of
+        Left err -> error $ "Failed to append event: " ++ err
+        Right () -> return eventOffset
   
   return $ PostMessageResponse eventOffsetValue
 
@@ -241,10 +260,12 @@ getEvents _store (ChatId uuid) maybeOffset = do
 
 -- Helper functions
 
+-- | Get current timestamp with microsecond precision to avoid collisions
 getCurrentTimestamp :: IO Word64
 getCurrentTimestamp = do
   posixTime <- getPOSIXTime
-  return $ round posixTime
+  -- Convert to microseconds to avoid collisions within same second
+  return $ round (posixTime * 1000000)
 
 -- | Calculate the next event offset by reading the index and last events page
 calculateNextOffset :: FilePath -> FilePath -> IO Word64
@@ -253,93 +274,109 @@ calculateNextOffset indexPath eventsPath = do
   eventsContent <- BS.readFile eventsPath
   
   let pageSize = 8192
-      numEventsPages = BS.length eventsContent `div` pageSize
-  
-  -- Parse the index page
-  case IndexPage.fromByteString indexContent of
-    Left _ -> return 0 -- Empty or corrupted index
-    Right indexPage -> do
-      let indexEntries = IndexPage.entries indexPage
+      eventsFileSize = BS.length eventsContent
       
-      if null indexEntries
-        then do
-          -- No index entries yet, count events in first page (page 0)
-          if numEventsPages == 0
-            then return 0
-            else do
-              let firstPageData = BS.take pageSize eventsContent
-              case EventsPage.fromByteString firstPageData of
-                Left _ -> return 0
-                Right page -> return $ fromIntegral $ EventsPage.eventCount page
-        else do
-          -- Get the last index entry
-          -- Index entries correspond to pages 1, 2, 3, etc. (page 0 has no entry)
-          -- If we have N entries, the last tracked page is page N (0-indexed)
-          let lastEntry = last indexEntries
-              lastPageIdx = length indexEntries
-              baseOffset = IndexPage.minimumEventOffset lastEntry
+  -- Validate file size is multiple of page size
+  if eventsFileSize `mod` pageSize /= 0
+    then error $ "Corrupted events file: size " ++ show eventsFileSize ++ " is not a multiple of " ++ show pageSize
+    else do
+      let numEventsPages = eventsFileSize `div` pageSize
+      
+      -- Parse the index page
+      case IndexPage.fromByteString indexContent of
+        Left _ -> return 0 -- Empty or corrupted index
+        Right indexPage -> do
+          let indexEntries = IndexPage.entries indexPage
           
-          -- Read the corresponding events page and count its events
-          if lastPageIdx >= numEventsPages
-            then return baseOffset -- Page hasn't been created yet
+          if null indexEntries
+            then do
+              -- No index entries yet, count events in first page (page 0)
+              if numEventsPages == 0
+                then return 0
+                else do
+                  let firstPageData = BS.take pageSize eventsContent
+                  case EventsPage.fromByteString firstPageData of
+                    Left _ -> return 0
+                    Right page -> return $ fromIntegral $ EventsPage.eventCount page
             else do
-              let pageData = BS.take pageSize $ BS.drop (lastPageIdx * pageSize) eventsContent
-              case EventsPage.fromByteString pageData of
-                Left _ -> return baseOffset
-                Right page -> do
-                  let eventsInPage = fromIntegral $ EventsPage.eventCount page
-                  return $ baseOffset + eventsInPage
+              -- Get the last index entry
+              -- Index entries correspond to pages 1, 2, 3, etc. (page 0 has no entry)
+              -- If we have N entries, the last tracked page is page N (0-indexed)
+              let lastEntry = last indexEntries
+                  lastPageIdx = length indexEntries
+                  baseOffset = IndexPage.minimumEventOffset lastEntry
+              
+              -- Read the corresponding events page and count its events
+              if lastPageIdx >= numEventsPages
+                then return baseOffset -- Page hasn't been created yet
+                else do
+                  let pageData = BS.take pageSize $ BS.drop (lastPageIdx * pageSize) eventsContent
+                  case EventsPage.fromByteString pageData of
+                    Left _ -> return baseOffset
+                    Right page -> do
+                      let eventsInPage = fromIntegral $ EventsPage.eventCount page
+                      return $ baseOffset + eventsInPage
 
-appendEventToFile :: FilePath -> FilePath -> BS.ByteString -> IO ()
+appendEventToFile :: FilePath -> FilePath -> BS.ByteString -> IO (Either String ())
 appendEventToFile indexPath eventsPath eventData = do
   -- Read entire files strictly
   eventsContent <- BS.readFile eventsPath
   indexContent <- BS.readFile indexPath
   
   let pageSize = 8192
-      numPages = BS.length eventsContent `div` pageSize
-  
-  if numPages == 0
-    then do
-      -- Create first page with event
-      let page = EventsPage.emptyPage
-      case EventsPage.addEvent page eventData of
-        Nothing -> return () -- Event too large, ignore
-        Just newPage -> BS.writeFile eventsPath (EventsPage.toByteString newPage)
+      eventsFileSize = BS.length eventsContent
+      
+  -- Validate file size is multiple of page size
+  if eventsFileSize `mod` pageSize /= 0
+    then return $ Left $ "Corrupted events file: size " ++ show eventsFileSize ++ " is not a multiple of " ++ show pageSize
     else do
-      -- Read last page and try to add event
-      let lastPageOffset = (numPages - 1) * pageSize
-          lastPageData = BS.drop lastPageOffset eventsContent
-      case EventsPage.fromByteString (BS.take pageSize lastPageData) of
-        Left _ -> return () -- Corrupted page
-        Right page -> do
+      let numPages = eventsFileSize `div` pageSize
+      
+      if numPages == 0
+        then do
+          -- Create first page with event
+          let page = EventsPage.emptyPage
           case EventsPage.addEvent page eventData of
+            Nothing -> return $ Left "Event too large for page"
             Just newPage -> do
-              -- Update last page
-              let beforeLastPage = BS.take lastPageOffset eventsContent
-                  newContent = beforeLastPage <> EventsPage.toByteString newPage
-              BS.writeFile eventsPath newContent
-            Nothing -> do
-              -- Page full, create new page and update index
-              let newPage = EventsPage.emptyPage
-              case EventsPage.addEvent newPage eventData of
-                Just finalPage -> do
-                  -- Calculate the next offset for the new page
-                  nextOffset <- calculateNextOffset indexPath eventsPath
-                  
-                  -- Append new events page
-                  let newContent = eventsContent <> EventsPage.toByteString finalPage
+              BS.writeFile eventsPath (EventsPage.toByteString newPage)
+              return $ Right ()
+        else do
+          -- Read last page and try to add event
+          let lastPageOffset = (numPages - 1) * pageSize
+              lastPageData = BS.drop lastPageOffset eventsContent
+          case EventsPage.fromByteString (BS.take pageSize lastPageData) of
+            Left _ -> return $ Left "Corrupted last page"
+            Right page -> do
+              case EventsPage.addEvent page eventData of
+                Just newPage -> do
+                  -- Update last page
+                  let beforeLastPage = BS.take lastPageOffset eventsContent
+                      newContent = beforeLastPage <> EventsPage.toByteString newPage
                   BS.writeFile eventsPath newContent
-                  
-                  -- Update index with new entry
-                  case IndexPage.fromByteString indexContent of
-                    Left _ -> return () -- Can't update corrupted index
-                    Right indexPage -> do
-                      case IndexPage.addEntry indexPage nextOffset of
-                        Left _ -> return () -- Index full or error
-                        Right newIndexPage -> 
-                          BS.writeFile indexPath (IndexPage.toByteString newIndexPage)
-                Nothing -> return () -- Event too large
+                  return $ Right ()
+                Nothing -> do
+                  -- Page full, create new page and update index
+                  let newPage = EventsPage.emptyPage
+                  case EventsPage.addEvent newPage eventData of
+                    Just finalPage -> do
+                      -- Calculate the next offset for the new page
+                      nextOffset <- calculateNextOffset indexPath eventsPath
+                      
+                      -- Append new events page
+                      let newContent = eventsContent <> EventsPage.toByteString finalPage
+                      BS.writeFile eventsPath newContent
+                      
+                      -- Update index with new entry
+                      case IndexPage.fromByteString indexContent of
+                        Left _ -> return $ Left "Corrupted index page"
+                        Right indexPage -> do
+                          case IndexPage.addEntry indexPage nextOffset of
+                            Left _ -> return $ Left "Index full or invalid offset"
+                            Right newIndexPage -> do
+                              BS.writeFile indexPath (IndexPage.toByteString newIndexPage)
+                              return $ Right ()
+                    Nothing -> return $ Left "Event too large for page"
 
 readEventsFromFile :: FilePath -> Word64 -> IO [EventResponse]
 readEventsFromFile path startOffset = do
@@ -350,7 +387,17 @@ readEventsFromFile path startOffset = do
       
   -- Simple implementation: read all events and filter
   allEvents <- extractAllEvents content 0 numPages 0
-  return $ drop (fromIntegral startOffset) allEvents
+  
+  -- Safe conversion of Word64 offset to Int for drop
+  let maxDrop :: Int
+      maxDrop = maxBound
+      safeDrop :: Int
+      safeDrop =
+        if startOffset > fromIntegral maxDrop
+          then maxDrop
+          else fromIntegral startOffset
+  
+  return $ drop safeDrop allEvents
 
 extractAllEvents :: BS.ByteString -> Int -> Int -> Word64 -> IO [EventResponse]
 extractAllEvents _ pageIdx numPages _ | pageIdx >= numPages = return []
@@ -361,9 +408,14 @@ extractAllEvents content pageIdx numPages cumulativeOffset = do
   case EventsPage.fromByteString pageData of
     Left _ -> extractAllEvents content (pageIdx + 1) numPages cumulativeOffset
     Right page -> do
-      let numEvents = EventsPage.eventCount page
-          eventsInPage = map (extractEvent page cumulativeOffset) [0 .. numEvents - 1]
-          nextOffset = cumulativeOffset + fromIntegral numEvents
+      let numEventsWord = EventsPage.eventCount page
+          numEvents :: Int
+          numEvents = fromIntegral numEventsWord
+          eventsInPage =
+            if numEventsWord == 0
+              then []
+              else map (extractEvent page cumulativeOffset) [0 .. numEvents - 1]
+          nextOffset = cumulativeOffset + fromIntegral numEventsWord
       rest <- extractAllEvents content (pageIdx + 1) numPages nextOffset
       return $ eventsInPage ++ rest
   where

@@ -2,5 +2,6 @@ packages: .
 
 -- Allow newer versions of template-haskell to work with uuid-types
 -- This workaround is needed for GHC 9.14+ where uuid-types hasn't yet declared support for template-haskell 2.24
--- Also allow newer base and template-haskell versions for servant and related packages with GHC 9.14+
+-- Broad allow-newer for base due to GHC 9.14+ compatibility issues with servant ecosystem
+-- In production, consider using constraints to pin to known-good versions
 allow-newer: uuid-types:template-haskell, *:base, *:template-haskell
