@@ -8,7 +8,6 @@ module Web.Convent.API
   ( API
   , server
   , ChatId(..)
-  , CreateChatRequest(..)
   , CreateChatResponse(..)
   , JoinChatRequest(..)
   , JoinChatResponse(..)
@@ -31,7 +30,6 @@ import Data.Int (Int64)
 import GHC.Generics (Generic)
 import Servant
 import System.Directory (createDirectoryIfMissing, doesDirectoryExist)
-import System.IO (openFile, IOMode(..), hClose)
 import qualified Data.ByteString as BS
 import Data.Time.Clock.POSIX (getPOSIXTime)
 
@@ -59,13 +57,6 @@ instance FromHttpApiData ChatId where
   parseUrlPiece txt = case UUID.fromText txt of
     Just uuid -> Right (ChatId uuid)
     Nothing -> Left "Invalid UUID format"
-
--- | Request to create a new chat
-data CreateChatRequest = CreateChatRequest
-  deriving (Show, Generic)
-
-instance ToJSON CreateChatRequest
-instance FromJSON CreateChatRequest
 
 -- | Response from creating a chat
 data CreateChatResponse = CreateChatResponse
@@ -137,7 +128,7 @@ instance FromJSON GetEventsResponse
 
 -- | API definition
 type API = 
-       "chats" :> ReqBody '[JSON] CreateChatRequest :> Post '[JSON] CreateChatResponse
+       "chats" :> Post '[JSON] CreateChatResponse
   :<|> "chats" :> Capture "id" ChatId :> "join" :> ReqBody '[JSON] JoinChatRequest :> Post '[JSON] JoinChatResponse
   :<|> "chats" :> Capture "id" ChatId :> "messages" :> ReqBody '[JSON] PostMessageRequest :> Post '[JSON] PostMessageResponse
   :<|> "chats" :> Capture "id" ChatId :> "events" :> QueryParam "offset" Word64 :> Get '[JSON] GetEventsResponse
@@ -150,8 +141,8 @@ server store = createChat store
           :<|> getEvents store
 
 -- | Create a new chat
-createChat :: ChatStore -> CreateChatRequest -> Handler CreateChatResponse
-createChat _store _req = do
+createChat :: ChatStore -> Handler CreateChatResponse
+createChat _store = do
   -- Generate a new UUID for the chat
   uuid <- liftIO UUID.V4.nextRandom
   let chatIdValue = ChatId uuid
@@ -166,15 +157,8 @@ createChat _store _req = do
   
   -- Create files with initial empty page
   liftIO $ do
-    -- Create index file with empty page
-    indexHandle <- openFile indexPath WriteMode
-    BS.hPut indexHandle (IndexPage.toByteString IndexPage.emptyPage)
-    hClose indexHandle
-    
-    -- Create events file with empty page
-    eventsHandle <- openFile eventsPath WriteMode
-    BS.hPut eventsHandle (EventsPage.toByteString EventsPage.emptyPage)
-    hClose eventsHandle
+    BS.writeFile indexPath (IndexPage.toByteString IndexPage.emptyPage)
+    BS.writeFile eventsPath (EventsPage.toByteString EventsPage.emptyPage)
   
   return $ CreateChatResponse chatIdValue
 
@@ -191,19 +175,9 @@ joinChat _store (ChatId uuid) JoinChatRequest{..} = do
   timestamp <- liftIO getCurrentTimestamp
   let pid = timestamp
   
-  -- Open files for appending
   let eventsPath = chatDir ++ "/events.dat"
-  eventsHandle <- liftIO $ openFile eventsPath ReadWriteMode
   
-  -- Get current event count to determine offset
-  currentOffset <- liftIO $ do
-    size <- BS.hGetContents eventsHandle
-    -- Close and reopen for writing
-    eventsHandle' <- openFile eventsPath ReadWriteMode
-    return eventsHandle'
-  
-  -- For simplicity, calculate offset from file
-  -- In a real implementation, we'd use ChatStore properly
+  -- Calculate next event offset
   eventOffset <- liftIO $ calculateNextOffset eventsPath
   
   -- Create and append ParticipantJoinedEvent
@@ -214,7 +188,6 @@ joinChat _store (ChatId uuid) JoinChatRequest{..} = do
         }
   
   liftIO $ appendEventToFile eventsPath (ParticipantJoinedEvent.encode event)
-  liftIO $ hClose currentOffset
   
   return $ JoinChatResponse pid eventOffset
 
@@ -271,9 +244,7 @@ getCurrentTimestamp = do
 
 calculateNextOffset :: FilePath -> IO Word64
 calculateNextOffset path = do
-  handle <- openFile path ReadMode
-  content <- BS.hGetContents handle
-  hClose handle
+  content <- BS.readFile path
   
   -- Count events by reading pages
   let pageSize = 8192
@@ -293,8 +264,8 @@ calculateNextOffset path = do
 
 appendEventToFile :: FilePath -> BS.ByteString -> IO ()
 appendEventToFile path eventData = do
-  handle <- openFile path ReadWriteMode
-  content <- BS.hGetContents handle
+  -- Read entire file strictly
+  content <- BS.readFile path
   
   let pageSize = 8192
       numPages = BS.length content `div` pageSize
@@ -305,10 +276,7 @@ appendEventToFile path eventData = do
       let page = EventsPage.emptyPage
       case EventsPage.addEvent page eventData of
         Nothing -> return () -- Event too large, ignore
-        Just newPage -> do
-          handle' <- openFile path WriteMode
-          BS.hPut handle' (EventsPage.toByteString newPage)
-          hClose handle'
+        Just newPage -> BS.writeFile path (EventsPage.toByteString newPage)
     else do
       -- Read last page and try to add event
       let lastPageOffset = (numPages - 1) * pageSize
@@ -320,25 +288,20 @@ appendEventToFile path eventData = do
             Just newPage -> do
               -- Update last page
               let beforeLastPage = BS.take lastPageOffset content
-              handle' <- openFile path WriteMode
-              BS.hPut handle' beforeLastPage
-              BS.hPut handle' (EventsPage.toByteString newPage)
-              hClose handle'
+                  newContent = beforeLastPage <> EventsPage.toByteString newPage
+              BS.writeFile path newContent
             Nothing -> do
               -- Page full, create new page
               let newPage = EventsPage.emptyPage
               case EventsPage.addEvent newPage eventData of
                 Just finalPage -> do
-                  handle' <- openFile path AppendMode
-                  BS.hPut handle' (EventsPage.toByteString finalPage)
-                  hClose handle'
+                  let newContent = content <> EventsPage.toByteString finalPage
+                  BS.writeFile path newContent
                 Nothing -> return () -- Event too large
 
 readEventsFromFile :: FilePath -> Word64 -> IO [EventResponse]
 readEventsFromFile path startOffset = do
-  handle <- openFile path ReadMode
-  content <- BS.hGetContents handle
-  hClose handle
+  content <- BS.readFile path
   
   let pageSize = 8192
       numPages = BS.length content `div` pageSize
