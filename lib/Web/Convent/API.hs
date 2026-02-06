@@ -15,6 +15,8 @@ module Web.Convent.API
   , PostMessageResponse(..)
   , GetEventsResponse(..)
   , EventResponse(..)
+  , calculateNextOffset
+  , appendEventToFile
   ) where
 
 import Control.Monad.IO.Class (liftIO)
