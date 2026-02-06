@@ -246,21 +246,29 @@ calculateNextOffset :: FilePath -> IO Word64
 calculateNextOffset path = do
   content <- BS.readFile path
   
-  -- Count events by reading pages
+  -- Count events by reading all pages
   let pageSize = 8192
       numPages = BS.length content `div` pageSize
   
   if numPages == 0
     then return 0
     else do
-      -- Read last page
-      let lastPageData = BS.drop ((numPages - 1) * pageSize) content
-      case EventsPage.fromByteString (BS.take pageSize lastPageData) of
-        Left _ -> return 0
-        Right page -> do
-          let eventsInPage = fromIntegral $ EventsPage.eventCount page
-              previousEvents = fromIntegral (numPages - 1) * 1000 -- estimate
-          return $ previousEvents + eventsInPage
+      -- Count events in all pages
+      totalEvents <- countEventsInPages content 0 numPages
+      return totalEvents
+
+countEventsInPages :: BS.ByteString -> Int -> Int -> IO Word64
+countEventsInPages _ pageIdx numPages | pageIdx >= numPages = return 0
+countEventsInPages content pageIdx numPages = do
+  let pageOffset = pageIdx * 8192
+      pageData = BS.take 8192 $ BS.drop pageOffset content
+  
+  case EventsPage.fromByteString pageData of
+    Left _ -> countEventsInPages content (pageIdx + 1) numPages
+    Right page -> do
+      let eventsInPage = fromIntegral $ EventsPage.eventCount page
+      restEvents <- countEventsInPages content (pageIdx + 1) numPages
+      return $ eventsInPage + restEvents
 
 appendEventToFile :: FilePath -> BS.ByteString -> IO ()
 appendEventToFile path eventData = do
@@ -307,24 +315,25 @@ readEventsFromFile path startOffset = do
       numPages = BS.length content `div` pageSize
       
   -- Simple implementation: read all events and filter
-  allEvents <- extractAllEvents content 0 numPages
+  allEvents <- extractAllEvents content 0 numPages 0
   return $ drop (fromIntegral startOffset) allEvents
 
-extractAllEvents :: BS.ByteString -> Int -> Int -> IO [EventResponse]
-extractAllEvents _ pageIdx numPages | pageIdx >= numPages = return []
-extractAllEvents content pageIdx numPages = do
+extractAllEvents :: BS.ByteString -> Int -> Int -> Word64 -> IO [EventResponse]
+extractAllEvents _ pageIdx numPages _ | pageIdx >= numPages = return []
+extractAllEvents content pageIdx numPages cumulativeOffset = do
   let pageOffset = pageIdx * 8192
       pageData = BS.take 8192 $ BS.drop pageOffset content
   
   case EventsPage.fromByteString pageData of
-    Left _ -> extractAllEvents content (pageIdx + 1) numPages
+    Left _ -> extractAllEvents content (pageIdx + 1) numPages cumulativeOffset
     Right page -> do
       let numEvents = EventsPage.eventCount page
-          eventsInPage = map (extractEvent page) [0 .. numEvents - 1]
-      rest <- extractAllEvents content (pageIdx + 1) numPages
+          eventsInPage = map (extractEvent page cumulativeOffset) [0 .. numEvents - 1]
+          nextOffset = cumulativeOffset + fromIntegral numEvents
+      rest <- extractAllEvents content (pageIdx + 1) numPages nextOffset
       return $ eventsInPage ++ rest
   where
-    extractEvent page idx = 
+    extractEvent page baseOffset idx = 
       let maybeEventBS = EventsPage.event page (fromIntegral idx)
           (eventTypeId, eventDataBS) = case maybeEventBS of
             Nothing -> (0, BS.empty)
@@ -332,7 +341,7 @@ extractAllEvents content pageIdx numPages = do
               if BS.length eventBS > 0 
               then (BS.index eventBS 0, eventBS)
               else (0, BS.empty)
-          globalOffset = fromIntegral $ pageIdx * 1000 + fromIntegral idx
+          globalOffset = baseOffset + fromIntegral idx
       in EventResponse
            { responseEventOffset = globalOffset
            , responseEventType = fromIntegral eventTypeId
