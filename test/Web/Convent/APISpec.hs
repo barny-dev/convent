@@ -6,7 +6,7 @@ import Control.Monad (when)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.ByteString as BS
 import Data.Aeson (decode, encode)
-import System.Directory (removeDirectoryRecursive, doesDirectoryExist)
+import System.Directory (removeDirectoryRecursive, doesDirectoryExist, doesFileExist)
 import System.IO.Temp (withSystemTempDirectory)
 import qualified Data.UUID as UUID
 import Data.Maybe (fromJust)
@@ -34,8 +34,11 @@ spec = describe "API" $ do
         BS.writeFile eventsPath (EventsPage.toByteString EventsPage.emptyPage)
         
         -- Verify files exist
-        indexExists <- doesDirectoryExist tmpDir
+        indexExists <- doesFileExist indexPath
         indexExists `shouldBe` True
+        
+        eventsExists <- doesFileExist eventsPath
+        eventsExists `shouldBe` True
         
         indexContent <- BS.readFile indexPath
         BS.length indexContent `shouldBe` 8192
@@ -100,7 +103,7 @@ spec = describe "API" $ do
         -- Check we now have multiple pages
         eventsContent2 <- BS.readFile eventsPath
         let numPages2 = BS.length eventsContent2 `div` 8192
-        numPages2 `shouldSatisfy` (>= 1)
+        numPages2 `shouldSatisfy` (> 1)
         
         -- If we have multiple pages, check index was updated
         when (numPages2 > 1) $ do

@@ -273,8 +273,10 @@ calculateNextOffset indexPath eventsPath = do
                 Right page -> return $ fromIntegral $ EventsPage.eventCount page
         else do
           -- Get the last index entry
+          -- Index entries correspond to pages 1, 2, 3, etc. (page 0 has no entry)
+          -- If we have N entries, the last tracked page is page N (0-indexed)
           let lastEntry = last indexEntries
-              lastPageIdx = length indexEntries -- Index entries start from page 1
+              lastPageIdx = length indexEntries
               baseOffset = IndexPage.minimumEventOffset lastEntry
           
           -- Read the corresponding events page and count its events
