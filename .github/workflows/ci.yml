@@ -14,7 +14,7 @@ jobs:
     strategy:
       matrix:
         ghc: ['9.14.1']
-        cabal: ['3.14.0.0']
+        cabal: ['latest']
     
     steps:
     - name: Checkout code
