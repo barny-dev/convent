@@ -1,4 +1,3 @@
-
 module Main where
 
 import Test.Hspec
@@ -9,6 +8,7 @@ import qualified Web.Convent.Storage.FilePageSpec as FilePageSpec
 import qualified Web.Convent.Events.ParticipantLeftEventSpec as ParticipantLeftEventSpec
 import qualified Web.Convent.Events.MessageSubmittedEventSpec as MessageSubmittedEventSpec
 import qualified Web.Convent.Events.ChatFlowSpec as ChatFlowSpec
+import qualified Web.Convent.APISpec as APISpec
 
 main :: IO ()
 main = hspec $ do
@@ -19,3 +19,4 @@ main = hspec $ do
   describe "ParticipantLeftEvent" ParticipantLeftEventSpec.spec
   describe "MessageSubmittedEvent" MessageSubmittedEventSpec.spec
   describe "ChatFlow" ChatFlowSpec.spec
+  describe "API" APISpec.spec
