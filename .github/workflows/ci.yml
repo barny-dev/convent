@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, copilot/** ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        ghc: ['9.14.1']
+        cabal: ['latest']
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Setup Haskell
+      uses: haskell-actions/setup@v2
+      with:
+        ghc-version: ${{ matrix.ghc }}
+        cabal-version: ${{ matrix.cabal }}
+    
+    - name: Cache cabal store
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cabal/store
+          ~/.cabal/packages
+          dist-newstyle
+        key: ${{ runner.os }}-cabal-${{ matrix.ghc }}-${{ hashFiles('**/*.cabal', 'cabal.project') }}
+        restore-keys: |
+          ${{ runner.os }}-cabal-${{ matrix.ghc }}-
+          ${{ runner.os }}-cabal-
+    
+    - name: Update cabal package list
+      run: cabal update
+    
+    - name: Configure project
+      run: cabal configure --enable-tests --enable-benchmarks
+    
+    - name: Build dependencies
+      run: cabal build --only-dependencies all
+    
+    - name: Build project
+      run: cabal build all
+    
+    - name: Run tests
+      run: cabal test all --test-show-details=direct
