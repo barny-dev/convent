@@ -52,7 +52,3 @@ jobs:
     
     - name: Run tests
       run: cabal test all --test-show-details=direct
-    
-    - name: Generate documentation
-      run: cabal haddock all
-      continue-on-error: true
