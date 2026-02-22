@@ -26,12 +26,11 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
-import qualified Data.UUID.V4 as UUID.V4
 import Data.Word (Word64)
 import Data.Int (Int64)
 import GHC.Generics (Generic)
 import Servant
-import System.Directory (createDirectoryIfMissing, doesDirectoryExist)
+import System.Directory (doesDirectoryExist)
 import qualified Data.ByteString as BS
 import Data.Time.Clock.POSIX (getPOSIXTime)
 
@@ -151,25 +150,10 @@ server store = createChat store
 
 -- | Create a new chat
 createChat :: ChatStore -> Handler CreateChatResponse
-createChat _store = do
-  -- Generate a new UUID for the chat
-  uuid <- liftIO UUID.V4.nextRandom
-  let chatIdValue = ChatId uuid
-  
-  -- Create chat directory
-  let chatDir = "chats/" ++ UUID.toString uuid
-  liftIO $ createDirectoryIfMissing True chatDir
-  
-  -- Create empty index and events files
-  let indexPath = chatDir ++ "/index.dat"
-      eventsPath = chatDir ++ "/events.dat"
-  
-  -- Create files with initial empty page
-  liftIO $ do
-    BS.writeFile indexPath (IndexPage.toByteString IndexPage.emptyPage)
-    BS.writeFile eventsPath (EventsPage.toByteString EventsPage.emptyPage)
-  
-  return $ CreateChatResponse chatIdValue
+createChat store = do
+  -- Call ChatStore to create a new chat
+  uuid <- liftIO $ ChatStore.createChat store
+  return $ CreateChatResponse (ChatId uuid)
 
 -- | Join a chat
 joinChat :: ChatStore -> ChatId -> JoinChatRequest -> Handler JoinChatResponse

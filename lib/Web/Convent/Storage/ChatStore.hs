@@ -4,6 +4,7 @@ module Web.Convent.Storage.ChatStore
   ( ChatStore
   , ChatData(..)
   , newChatStore
+  , createChat
   , withChatLock
   , getHighestEventOffset
   ) where
@@ -14,8 +15,11 @@ import Control.Exception (bracket)
 import Control.Monad.Trans.Except (ExceptT (..), except, withExceptT, throwE, catchE, runExceptT)
 import qualified Data.Map.Strict as Map
 import Data.UUID (UUID)
+import qualified Data.UUID.V4 as UUID.V4
 import Data.Word (Word64)
 import System.IO (Handle, hFileSize)
+import System.Directory (createDirectoryIfMissing)
+import qualified Data.ByteString as BS
 import Web.Convent.Storage.IndexPage (IndexPage)
 import Data.Maybe (maybe)
 import qualified Web.Convent.Storage.IndexPage as IndexPage
@@ -78,6 +82,26 @@ newtype ChatStore = ChatStore (MVar (Map.Map UUID (MVar ChatData)))
 -- | Creates a new empty chat store
 newChatStore :: IO ChatStore
 newChatStore = ChatStore <$> newMVar Map.empty
+
+-- | Creates a new chat with a unique UUID and initializes storage files
+createChat :: ChatStore -> IO UUID
+createChat _store = do
+  -- Generate a new UUID for the chat
+  uuid <- UUID.V4.nextRandom
+  
+  -- Create chat directory
+  let chatDir = "chats/" ++ show uuid
+  createDirectoryIfMissing True chatDir
+  
+  -- Create empty index and events files
+  let indexPath = chatDir ++ "/index.dat"
+      eventsPath = chatDir ++ "/events.dat"
+  
+  -- Create files with initial empty page
+  BS.writeFile indexPath (IndexPage.toByteString IndexPage.emptyPage)
+  BS.writeFile eventsPath (EventsPage.toByteString EventsPage.emptyPage)
+  
+  return uuid
 
 -- | Executes an action with exclusive access to chat data
 withChatLock :: ChatStore -> UUID -> (ChatData -> IO a) -> IO a
