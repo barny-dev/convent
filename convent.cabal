@@ -34,9 +34,9 @@ library
                     , Web.Convent.Events.ParticipantLeftEvent
                     , Web.Convent.Events.MessageSubmittedEvent
                     , Web.Convent.API
-    build-depends:    base >= 4.22
-                    , bytestring >= 0.12
-                    , text >= 2.1
+    build-depends:    base >= 4.18 && < 5
+                    , bytestring >= 0.11
+                    , text >= 2.0
                     , transformers >= 0.6
                     , containers >= 0.6
                     , uuid >= 1.3.15
@@ -52,7 +52,7 @@ executable convent-exe
     main-is:          Main.hs
     -- other-modules:
     -- other-extensions:
-    build-depends:    base >= 4.22
+    build-depends:    base >= 4.18 && < 5
                     , convent
                     , warp >= 3.3
                     , servant-server >= 0.19
@@ -75,9 +75,9 @@ test-suite convent-test
                     , Web.Convent.APISpec
     hs-source-dirs:   test
     build-depends:    convent
-                    , base >= 4.22
-                    , bytestring >= 0.12
-                    , text >= 2.1
+                    , base >= 4.18 && < 5
+                    , bytestring >= 0.11
+                    , text >= 2.0
                     , hspec >= 2.11
                     , temporary >= 1.3
                     , directory >= 1.3

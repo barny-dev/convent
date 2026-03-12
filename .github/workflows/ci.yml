@@ -13,7 +13,7 @@ jobs:
     
     strategy:
       matrix:
-        ghc: ['9.14.1']
+        ghc: ['9.10.1']
         cabal: ['latest']
     
     steps:
