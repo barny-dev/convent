@@ -29,8 +29,9 @@ import Data.Word (Word64)
 import GHC.Generics (Generic)
 import Servant
 
-import Web.Convent.Storage.ChatStore (ChatStore, EventResponse(..))
+import Web.Convent.Storage.ChatStore (ChatStore)
 import qualified Web.Convent.Storage.ChatStore as ChatStore
+import Web.Convent.Storage.ChatDataOps (EventResponse(..))
 
 -- | Chat identifier
 newtype ChatId = ChatId UUID

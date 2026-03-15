@@ -13,6 +13,7 @@ module Web.Convent.Storage.ChatDataOps
 
 import Control.Monad.Trans.Except (ExceptT(..), runExceptT, except, throwE)
 import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.State.Strict (StateT, runStateT, get, put)
 import Control.Monad (when)
 import qualified Data.Map.Strict as Map
 import Data.Word (Word64)
@@ -49,6 +50,73 @@ data EventResponse = EventResponse
 instance ToJSON EventResponse
 instance FromJSON EventResponse
 
+-- | ChatDataState monad: ExceptT for errors, StateT for ChatData updates
+type ChatDataState a = ExceptT String (StateT ChatData IO) a
+
+-- | Run a ChatDataState computation and return result with updated ChatData
+runChatDataState :: ChatDataState a -> ChatData -> IO (Either String a, ChatData)
+runChatDataState action chatData = runStateT (runExceptT action) chatData
+
+-- | Load an index page (check cache first, load from file if needed, update cache)
+loadIndexPage :: Int -> ChatDataState IndexPage
+loadIndexPage pageIdx = do
+  chatData <- lift get
+  case Map.lookup pageIdx (chatDataCachedIndexPages chatData) of
+    Just page -> return page  -- Cache hit
+    Nothing -> do
+      -- Cache miss - load from file
+      eitherPage <- lift $ lift $ FilePage.load (chatDataIndexHandle chatData) (FilePage.Index pageIdx, FilePage.Size 8192)
+      case eitherPage of
+        Left _ -> throwE "Failed to load index page"
+        Right page -> do
+          -- Update cache
+          let newCachedPages = Map.insert pageIdx page (chatDataCachedIndexPages chatData)
+          lift $ put $ chatData { chatDataCachedIndexPages = newCachedPages }
+          return page
+
+-- | Load an events page (check cache first, load from file if needed, update cache)
+loadEventsPage :: Int -> ChatDataState EventsPage
+loadEventsPage pageIdx = do
+  chatData <- lift get
+  case Map.lookup pageIdx (chatDataCachedEventPages chatData) of
+    Just page -> return page  -- Cache hit
+    Nothing -> do
+      -- Cache miss - load from file
+      eitherPage <- lift $ lift $ FilePage.load (chatDataEventsHandle chatData) (FilePage.Index pageIdx, FilePage.Size 8192)
+      case eitherPage of
+        Left _ -> throwE "Failed to load events page"
+        Right page -> do
+          -- Update cache
+          let newCachedPages = Map.insert pageIdx page (chatDataCachedEventPages chatData)
+          lift $ put $ chatData { chatDataCachedEventPages = newCachedPages }
+          return page
+
+-- | Save an index page (write to file and update cache atomically)
+saveIndexPage :: Int -> IndexPage -> ChatDataState ()
+saveIndexPage pageIdx page = do
+  chatData <- lift get
+  -- Write to file
+  eitherUnit <- lift $ lift $ FilePage.save (chatDataIndexHandle chatData) (FilePage.Index pageIdx, FilePage.Size 8192) page
+  case eitherUnit of
+    Left _ -> throwE "Failed to save index page"
+    Right () -> do
+      -- Update cache
+      let newCachedPages = Map.insert pageIdx page (chatDataCachedIndexPages chatData)
+      lift $ put $ chatData { chatDataCachedIndexPages = newCachedPages }
+
+-- | Save an events page (write to file and update cache atomically)
+saveEventsPage :: Int -> EventsPage -> ChatDataState ()
+saveEventsPage pageIdx page = do
+  chatData <- lift get
+  -- Write to file
+  eitherUnit <- lift $ lift $ FilePage.save (chatDataEventsHandle chatData) (FilePage.Index pageIdx, FilePage.Size 8192) page
+  case eitherUnit of
+    Left _ -> throwE "Failed to save events page"
+    Right () -> do
+      -- Update cache
+      let newCachedPages = Map.insert pageIdx page (chatDataCachedEventPages chatData)
+      lift $ put $ chatData { chatDataCachedEventPages = newCachedPages }
+
 -- | Get current timestamp with microsecond precision to avoid collisions
 getCurrentTimestamp :: IO Word64
 getCurrentTimestamp = do
@@ -58,33 +126,29 @@ getCurrentTimestamp = do
 
 -- | Calculate next event offset from ChatData (reads from cached pages and index)
 getNextOffsetFromChatData :: ChatData -> IO (Either String Word64)
-getNextOffsetFromChatData ChatData{..} = runExceptT $ do
+getNextOffsetFromChatData chatData = 
   -- If no events pages exist, offset is 0
-  when (chatDataEventsPageCount == 0) $ throwE "No events pages"
+  if chatDataEventsPageCount chatData == 0
+    then return $ Right 0
+    else do
+      (result, _updatedChatData) <- runChatDataState getNextOffsetState chatData
+      return result
+
+-- | Internal implementation using ChatDataState monad
+getNextOffsetState :: ChatDataState Word64
+getNextOffsetState = do
+  chatData <- lift get
   
   -- Get the last index page
-  let lastIndexPageIdx = chatDataIndexPageCount - 1
-  lastIndexPage <- case Map.lookup lastIndexPageIdx chatDataCachedIndexPages of
-    Just page -> return page
-    Nothing -> do
-      -- Load from file
-      eitherPage <- lift $ FilePage.load chatDataIndexHandle (FilePage.Index lastIndexPageIdx, FilePage.Size 8192)
-      case eitherPage of
-        Left _ -> throwE "Failed to load index page"
-        Right page -> return page
+  let lastIndexPageIdx = chatDataIndexPageCount chatData - 1
+  lastIndexPage <- loadIndexPage lastIndexPageIdx
   
   let indexEntries = IndexPage.entries lastIndexPage
   
   if null indexEntries
     then do
       -- No index entries yet, get count from first events page (page 0)
-      firstEventsPage <- case Map.lookup 0 chatDataCachedEventPages of
-        Just page -> return page
-        Nothing -> do
-          eitherPage <- lift $ FilePage.load chatDataEventsHandle (FilePage.Index 0, FilePage.Size 8192)
-          case eitherPage of
-            Left _ -> throwE "Failed to load first events page"
-            Right page -> return page
+      firstEventsPage <- loadEventsPage 0
       return $ fromIntegral $ EventsPage.eventCount firstEventsPage
     else do
       -- Get last entry to find base offset and corresponding page
@@ -94,13 +158,7 @@ getNextOffsetFromChatData ChatData{..} = runExceptT $ do
           baseOffset = IndexPage.minimumEventOffset lastEntry
       
       -- Get the corresponding events page
-      lastEventsPage <- case Map.lookup lastPageIdx chatDataCachedEventPages of
-        Just page -> return page
-        Nothing -> do
-          eitherPage <- lift $ FilePage.load chatDataEventsHandle (FilePage.Index lastPageIdx, FilePage.Size 8192)
-          case eitherPage of
-            Left _ -> throwE "Failed to load events page"
-            Right page -> return page
+      lastEventsPage <- loadEventsPage lastPageIdx
       
       let eventsInPage = fromIntegral $ EventsPage.eventCount lastEventsPage
       return $ baseOffset + eventsInPage
@@ -108,36 +166,34 @@ getNextOffsetFromChatData ChatData{..} = runExceptT $ do
 -- | Add an event to ChatData (mid-level abstraction)
 -- Returns the new ChatData and the event offset
 addEventToChatData :: ChatData -> BS.ByteString -> IO (Either String (ChatData, Word64))
-addEventToChatData chatData@ChatData{..} eventData = runExceptT $ do
+addEventToChatData chatData eventData = do
+  (result, newChatData) <- runChatDataState (addEventToChatDataState eventData) chatData
+  case result of
+    Left err -> return $ Left err
+    Right offset -> return $ Right (newChatData, offset)
+
+-- | Internal implementation using ChatDataState monad
+addEventToChatDataState :: BS.ByteString -> ChatDataState Word64
+addEventToChatDataState eventData = do
+  chatData <- lift get
+  
   -- Calculate the offset for this event
-  eitherOffset <- lift $ getNextOffsetFromChatData chatData
+  eitherOffset <- lift $ lift $ getNextOffsetFromChatData chatData
   eventOffset <- except eitherOffset
   
   -- Handle first page case
-  when (chatDataEventsPageCount == 0) $ throwE "No events pages (should have been initialized)"
+  when (chatDataEventsPageCount chatData == 0) $ throwE "No events pages (should have been initialized)"
   
   -- Get the last events page
-  let lastEventsPageIdx = chatDataEventsPageCount - 1
-  lastEventsPage <- case Map.lookup lastEventsPageIdx chatDataCachedEventPages of
-    Just page -> return page
-    Nothing -> do
-      eitherPage <- lift $ FilePage.load chatDataEventsHandle (FilePage.Index lastEventsPageIdx, FilePage.Size 8192)
-      case eitherPage of
-        Left _ -> throwE "Failed to load last events page"
-        Right page -> return page
+  let lastEventsPageIdx = chatDataEventsPageCount chatData - 1
+  lastEventsPage <- loadEventsPage lastEventsPageIdx
   
   -- Try to add event to last page
   case EventsPage.addEvent lastEventsPage eventData of
     Just newPage -> do
-      -- Event fits in current page, update it
-      eitherUnit <- lift $ FilePage.save chatDataEventsHandle (FilePage.Index lastEventsPageIdx, FilePage.Size 8192) newPage
-      case eitherUnit of
-        Left _ -> throwE "Failed to store updated events page"
-        Right () -> do
-          -- Update cached page
-          let newCachedEventPages = Map.insert lastEventsPageIdx newPage chatDataCachedEventPages
-              newChatData = chatData { chatDataCachedEventPages = newCachedEventPages }
-          return (newChatData, eventOffset)
+      -- Event fits in current page, save it
+      saveEventsPage lastEventsPageIdx newPage
+      return eventOffset
     Nothing -> do
       -- Page is full, need to create new page and update index
       let newEventsPage = EventsPage.emptyPage
@@ -145,38 +201,24 @@ addEventToChatData chatData@ChatData{..} eventData = runExceptT $ do
         Nothing -> throwE "Event too large for empty page"
         Just finalPage -> do
           -- Append new events page
-          let newEventsPageIdx = chatDataEventsPageCount
-          eitherUnit <- lift $ FilePage.save chatDataEventsHandle (FilePage.Index newEventsPageIdx, FilePage.Size 8192) finalPage
-          case eitherUnit of
-            Left _ -> throwE "Failed to store new events page"
-            Right () -> do
-              -- Update index with new entry
-              let lastIndexPageIdx = chatDataIndexPageCount - 1
-              lastIndexPage <- case Map.lookup lastIndexPageIdx chatDataCachedIndexPages of
-                Just page -> return page
-                Nothing -> do
-                  eitherPage <- lift $ FilePage.load chatDataIndexHandle (FilePage.Index lastIndexPageIdx, FilePage.Size 8192)
-                  case eitherPage of
-                    Left _ -> throwE "Failed to load index page"
-                    Right page -> return page
+          let newEventsPageIdx = chatDataEventsPageCount chatData
+          saveEventsPage newEventsPageIdx finalPage
+          
+          -- Update index with new entry
+          let lastIndexPageIdx = chatDataIndexPageCount chatData - 1
+          lastIndexPage <- loadIndexPage lastIndexPageIdx
+          
+          case IndexPage.addEntry lastIndexPage eventOffset of
+            Left _ -> throwE "Index full or invalid offset"
+            Right newIndexPage -> do
+              -- Store updated index page
+              saveIndexPage lastIndexPageIdx newIndexPage
               
-              case IndexPage.addEntry lastIndexPage eventOffset of
-                Left _ -> throwE "Index full or invalid offset"
-                Right newIndexPage -> do
-                  -- Store updated index page
-                  eitherUnit2 <- lift $ FilePage.save chatDataIndexHandle (FilePage.Index lastIndexPageIdx, FilePage.Size 8192) newIndexPage
-                  case eitherUnit2 of
-                    Left _ -> throwE "Failed to store updated index page"
-                    Right () -> do
-                      -- Update cached data
-                      let newCachedIndexPages = Map.insert lastIndexPageIdx newIndexPage chatDataCachedIndexPages
-                          newCachedEventPages = Map.insert newEventsPageIdx finalPage chatDataCachedEventPages
-                          newChatData = chatData 
-                            { chatDataCachedIndexPages = newCachedIndexPages
-                            , chatDataCachedEventPages = newCachedEventPages
-                            , chatDataEventsPageCount = newEventsPageIdx + 1
-                            }
-                      return (newChatData, eventOffset)
+              -- Update page count
+              chatData' <- lift get
+              lift $ put $ chatData' { chatDataEventsPageCount = newEventsPageIdx + 1 }
+              
+              return eventOffset
 
 -- | Get events from ChatData starting from an offset
 getEventsFromChatData :: ChatData -> Word64 -> IO (Either String [EventResponse])
@@ -195,31 +237,32 @@ getEventsFromChatData ChatData{..} startOffset = runExceptT $ do
   
   return $ drop safeDrop allEvents
 
--- | Extract all events from ChatData
+-- | Extract all events from ChatData (helper for getEventsFromChatData)
 extractAllEventsFromChatData :: ChatData -> Int -> Int -> Word64 -> IO [EventResponse]
 extractAllEventsFromChatData chatData pageIdx numPages cumulativeOffset
   | pageIdx >= numPages = return []
   | otherwise = do
-      -- Get or load the events page
-      let ChatData{..} = chatData
-      eitherPage <- case Map.lookup pageIdx chatDataCachedEventPages of
-        Just page -> return $ Right page
-        Nothing -> FilePage.load chatDataEventsHandle (FilePage.Index pageIdx, FilePage.Size 8192)
-      
-      case eitherPage of
+      -- Use ChatDataState to benefit from cache management
+      (result, _updatedChatData) <- runChatDataState (extractEventsFromPage pageIdx) chatData
+      case result of
         Left _ -> extractAllEventsFromChatData chatData (pageIdx + 1) numPages cumulativeOffset
-        Right page -> do
-          let numEventsWord = EventsPage.eventCount page
-              numEvents :: Int
-              numEvents = fromIntegral numEventsWord
-              eventsInPage =
-                if numEventsWord == 0
-                  then []
-                  else map (extractEvent page cumulativeOffset) [0 .. numEvents - 1]
-              nextOffset = cumulativeOffset + fromIntegral numEventsWord
+        Right (eventsInPage, nextOffset) -> do
           rest <- extractAllEventsFromChatData chatData (pageIdx + 1) numPages nextOffset
           return $ eventsInPage ++ rest
   where
+    extractEventsFromPage :: Int -> ChatDataState ([EventResponse], Word64)
+    extractEventsFromPage idx = do
+      page <- loadEventsPage idx
+      let numEventsWord = EventsPage.eventCount page
+          numEvents :: Int
+          numEvents = fromIntegral numEventsWord
+          eventsInPage =
+            if numEventsWord == 0
+              then []
+              else map (extractEvent page cumulativeOffset) [0 .. numEvents - 1]
+          nextOffset = cumulativeOffset + fromIntegral numEventsWord
+      return (eventsInPage, nextOffset)
+    
     extractEvent page baseOffset idx = 
       let maybeEventBS = EventsPage.event page (fromIntegral idx)
           (eventTypeId, eventDataBS) = case maybeEventBS of

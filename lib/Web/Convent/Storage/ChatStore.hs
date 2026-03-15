@@ -24,7 +24,7 @@ import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID.V4
 import Data.Word (Word64)
 import Data.Text (Text)
-import System.IO (openFile, hClose, IOMode(..))
+import System.IO (openBinaryFile, hClose, IOMode(..))
 import System.Directory (doesDirectoryExist, listDirectory, doesFileExist)
 import qualified Web.Convent.Storage.ChatFileOps as ChatFileOps
 import Web.Convent.Storage.ChatDataOps
@@ -78,8 +78,8 @@ loadExistingChats store@(ChatStore dataMVar config) = runExceptT $ do
                 if indexExists && eventsExists
                   then do
                     -- Open handles
-                    indexHandle <- openFile indexPath ReadWriteMode
-                    eventsHandle <- openFile eventsPath ReadWriteMode
+                    indexHandle <- openBinaryFile indexPath ReadWriteMode
+                    eventsHandle <- openBinaryFile eventsPath ReadWriteMode
                     
                     -- Initialize ChatData
                     eitherChatData <- ChatFileOps.initChatDataFromFiles indexHandle eventsHandle
@@ -105,8 +105,9 @@ loadExistingChats store@(ChatStore dataMVar config) = runExceptT $ do
       return $ length loadedUUIDs
 
 -- | Creates a new chat with a unique UUID and initializes storage files
+-- The chat is automatically loaded into memory and ready for use
 createChat :: ChatStore -> IO UUID
-createChat (ChatStore _ config) = do
+createChat (ChatStore dataMVar config) = do
   -- Generate a new UUID for the chat
   uuid <- UUID.V4.nextRandom
   
@@ -116,7 +117,27 @@ createChat (ChatStore _ config) = do
   -- Use low-level file operations to create chat files
   ChatFileOps.createChatFiles chatDir
   
-  return uuid
+  -- Load the new chat into memory (open handles and initialize ChatData)
+  let indexPath = chatDir ++ "/index.dat"
+      eventsPath = chatDir ++ "/events.dat"
+  
+  indexHandle <- openBinaryFile indexPath ReadWriteMode
+  eventsHandle <- openBinaryFile eventsPath ReadWriteMode
+  eitherChatData <- ChatFileOps.initChatDataFromFiles indexHandle eventsHandle
+  
+  case eitherChatData of
+    Left _ -> do
+      -- Failed to initialize, close handles
+      hClose indexHandle
+      hClose eventsHandle
+      error "Failed to initialize newly created chat"
+    Right chatData -> do
+      -- Add to in-memory cache
+      chatDataMVar <- newMVar chatData
+      modifyMVar_ dataMVar $ \chatsMap -> do
+        return $ Map.insert uuid chatDataMVar chatsMap
+      
+      return uuid
 
 -- | Check if a chat exists - uses in-memory cache for active chats
 chatExists :: ChatStore -> UUID -> IO Bool
