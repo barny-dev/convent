@@ -28,7 +28,9 @@ library
                     , Web.Convent.Storage.FilePage
                     , Web.Convent.Storage.PageOps
                     , Web.Convent.Storage.IndexPage
-                    , Web.Convent.Storage.ChatStore        
+                    , Web.Convent.Storage.ChatStore
+                    , Web.Convent.Storage.ChatFileOps
+                    , Web.Convent.Storage.ChatDataOps
                     , Web.Convent.Util.ByteString
                     , Web.Convent.Events.ParticipantJoinedEvent
                     , Web.Convent.Events.ParticipantLeftEvent
