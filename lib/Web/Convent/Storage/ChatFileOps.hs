@@ -10,8 +10,8 @@ module Web.Convent.Storage.ChatFileOps
 import Control.Monad.Trans.Except (ExceptT(..), runExceptT, withExceptT)
 import Control.Monad.Trans.Class (lift)
 import System.IO (Handle, hFileSize)
+import qualified System.IO as IO
 import System.Directory (createDirectoryIfMissing)
-import qualified Data.ByteString as BS
 import qualified Data.Map.Strict as Map
 import Web.Convent.Storage.IndexPage (IndexPage)
 import qualified Web.Convent.Storage.IndexPage as IndexPage
@@ -33,9 +33,13 @@ createChatFiles chatDir = do
   -- Create empty index and events files
   let indexPath = chatDir ++ "/index.dat"
       eventsPath = chatDir ++ "/events.dat"
-  
-  BS.writeFile indexPath (IndexPage.toByteString IndexPage.emptyPage)
-  BS.writeFile eventsPath (EventsPage.toByteString EventsPage.emptyPage)
+
+  IO.withBinaryFile indexPath IO.WriteMode $ \indexHandle -> do
+    either (error . show) (const $ return ()) =<<
+      FilePage.write indexHandle (FilePage.Index 0, FilePage.Size 8192) (IndexPage.toByteString IndexPage.emptyPage)
+  IO.withBinaryFile eventsPath IO.WriteMode $ \eventsHandle -> do
+    either (error . show) (const $ return ()) =<<
+      FilePage.write eventsHandle (FilePage.Index 0, FilePage.Size 8192) (EventsPage.toByteString EventsPage.emptyPage)
 
 -- | Initialize ChatData from file handles
 -- Reads file sizes, calculates page counts, and caches the last page of each file
