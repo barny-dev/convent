@@ -1,0 +1,212 @@
+name: Memory Profiling Experiment
+
+on:
+  workflow_dispatch:  # Manual trigger only
+    inputs:
+      message_count:
+        description: 'Number of messages to post'
+        required: false
+        default: '1000'
+      wait_time:
+        description: 'Time to wait after posting (seconds)'
+        required: false
+        default: '60'
+
+jobs:
+  memory-profile:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up GHC
+        uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.10.1'
+          cabal-version: 'latest'
+          
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cabal/store
+            ~/.cabal/packages
+            dist-newstyle
+          key: ${{ runner.os }}-cabal-${{ hashFiles('**/*.cabal', '**/cabal.project') }}
+          restore-keys: |
+            ${{ runner.os }}-cabal-
+      
+      - name: Install dependencies
+        run: |
+          cabal update
+          cabal build --only-dependencies
+      
+      - name: Build project
+        run: cabal build
+      
+      - name: Create memory profiling script
+        run: |
+          cat > memory_experiment.sh << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          MESSAGE_COUNT="${1:-1000}"
+          WAIT_TIME="${2:-60}"
+          
+          echo "===== Memory Profiling Experiment ====="
+          echo "Messages: $MESSAGE_COUNT"
+          echo "Wait time: ${WAIT_TIME}s"
+          echo "========================================"
+          
+          # Start the server in background
+          echo "Starting convent server..."
+          cabal run convent &
+          SERVER_PID=$!
+          
+          # Wait for server to be ready
+          echo "Waiting for server to start..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8080/chats > /dev/null 2>&1; then
+              echo "Server is ready!"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "Server failed to start in time"
+              kill $SERVER_PID 2>/dev/null || true
+              exit 1
+            fi
+            sleep 1
+          done
+          
+          # Log file
+          LOG_FILE="memory_stats.log"
+          echo "Timestamp,Phase,RSS_KB,VSZ_KB,MEM_PCT" > $LOG_FILE
+          
+          # Function to get memory stats
+          get_memory() {
+            local phase="$1"
+            local mem_stats=$(ps -p $SERVER_PID -o rss=,vsz=,%mem= 2>/dev/null || echo "0 0 0.0")
+            local timestamp=$(date +%s)
+            echo "$timestamp,$phase,$mem_stats" | tr -s ' ' ',' >> $LOG_FILE
+            echo "[$phase] RSS: $(echo $mem_stats | awk '{print $1}')KB, VSZ: $(echo $mem_stats | awk '{print $2}')KB, MEM: $(echo $mem_stats | awk '{print $3}')%"
+          }
+          
+          # Initial memory
+          sleep 2
+          get_memory "initial"
+          
+          # Create chat
+          echo "Creating chat..."
+          CHAT_RESPONSE=$(curl -s -X POST http://localhost:8080/chats)
+          CHAT_ID=$(echo $CHAT_RESPONSE | grep -o '"chatId":"[^"]*"' | cut -d'"' -f4)
+          
+          if [ -z "$CHAT_ID" ]; then
+            echo "Failed to create chat: $CHAT_RESPONSE"
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
+          
+          echo "Chat created: $CHAT_ID"
+          get_memory "chat_created"
+          
+          # Join participant
+          echo "Joining participant..."
+          JOIN_RESPONSE=$(curl -s -X POST http://localhost:8080/chats/$CHAT_ID/join \
+            -H "Content-Type: application/json" \
+            -d '{"participantName":"MemoryTester"}')
+          
+          PARTICIPANT_ID=$(echo $JOIN_RESPONSE | grep -o '"participantId":[0-9]*' | cut -d':' -f2)
+          
+          if [ -z "$PARTICIPANT_ID" ]; then
+            echo "Failed to join chat: $JOIN_RESPONSE"
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
+          
+          echo "Participant joined: $PARTICIPANT_ID"
+          get_memory "participant_joined"
+          
+          # Post messages
+          echo "Posting $MESSAGE_COUNT messages..."
+          BATCH_SIZE=100
+          for i in $(seq 1 $MESSAGE_COUNT); do
+            curl -s -X POST http://localhost:8080/chats/$CHAT_ID/messages \
+              -H "Content-Type: application/json" \
+              -d "{\"messageParticipantId\":$PARTICIPANT_ID,\"messageText\":\"Message $i\"}" > /dev/null
+            
+            # Log memory every BATCH_SIZE messages
+            if [ $((i % BATCH_SIZE)) -eq 0 ]; then
+              get_memory "after_${i}_messages"
+            fi
+          done
+          
+          echo "All messages posted"
+          get_memory "messages_complete"
+          
+          # Wait and monitor
+          echo "Waiting ${WAIT_TIME}s and monitoring memory..."
+          INTERVAL=10
+          for i in $(seq $INTERVAL $INTERVAL $WAIT_TIME); do
+            sleep $INTERVAL
+            get_memory "wait_${i}s"
+          done
+          
+          # Final stats
+          get_memory "final"
+          
+          # Analyze results
+          echo ""
+          echo "===== Memory Statistics Summary ====="
+          echo ""
+          echo "RSS (Resident Set Size) - Physical Memory:"
+          awk -F',' 'NR>1 {printf "  %-25s %10d KB\n", $2, $3}' $LOG_FILE
+          echo ""
+          echo "Memory Growth:"
+          INITIAL_RSS=$(awk -F',' 'NR==2 {print $3}' $LOG_FILE)
+          FINAL_RSS=$(awk -F',' 'NR==0+NR {print $3}' $LOG_FILE | tail -1)
+          GROWTH=$((FINAL_RSS - INITIAL_RSS))
+          echo "  Initial: ${INITIAL_RSS} KB"
+          echo "  Final: ${FINAL_RSS} KB"
+          echo "  Growth: ${GROWTH} KB ($(echo "scale=1; $GROWTH * 100 / $INITIAL_RSS" | bc)%)"
+          echo ""
+          
+          # Cleanup
+          echo "Cleaning up..."
+          kill $SERVER_PID 2>/dev/null || true
+          wait $SERVER_PID 2>/dev/null || true
+          
+          echo "Experiment complete! Full log saved to $LOG_FILE"
+          EOF
+          
+          chmod +x memory_experiment.sh
+      
+      - name: Run memory profiling experiment
+        run: |
+          ./memory_experiment.sh "${{ github.event.inputs.message_count }}" "${{ github.event.inputs.wait_time }}"
+      
+      - name: Upload memory profile results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: memory-profile-results
+          path: |
+            memory_stats.log
+          retention-days: 30
+      
+      - name: Display results summary
+        if: always()
+        run: |
+          if [ -f memory_stats.log ]; then
+            echo "## Memory Profiling Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Configuration" >> $GITHUB_STEP_SUMMARY
+            echo "- Messages: ${{ github.event.inputs.message_count || 1000 }}" >> $GITHUB_STEP_SUMMARY
+            echo "- Wait time: ${{ github.event.inputs.wait_time || 60 }}s" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Memory Usage (RSS)" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            awk -F',' 'NR>1 {printf "%-25s %10d KB\n", $2, $3}' memory_stats.log >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Full results available in artifacts." >> $GITHUB_STEP_SUMMARY
+          fi
