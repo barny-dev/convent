@@ -60,7 +60,7 @@ jobs:
           
           # Start the server in background
           echo "Starting convent server..."
-          cabal run convent &
+          cabal run convent-exe &
           SERVER_PID=$!
           
           # Wait for server to be ready
