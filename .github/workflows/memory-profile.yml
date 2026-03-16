@@ -58,10 +58,12 @@ jobs:
           echo "Wait time: ${WAIT_TIME}s"
           echo "========================================"
           
-          # Start the server in background
+          # Start the built server executable directly so we profile the real server
           echo "Starting convent server..."
-          cabal run convent-exe &
+          SERVER_BIN=$(cabal list-bin convent-exe)
+          "$SERVER_BIN" &
           SERVER_PID=$!
+          echo "Server PID: $SERVER_PID"
           
           # Wait for server to be ready
           echo "Waiting for server to start..."
@@ -97,7 +99,7 @@ jobs:
           
           # Create chat
           echo "Creating chat..."
-          CHAT_RESPONSE=$(curl -s -X POST http://localhost:8080/chats)
+          CHAT_RESPONSE=$(curl -fsS -X POST http://localhost:8080/chats)
           CHAT_ID=$(echo $CHAT_RESPONSE | grep -o '"chatId":"[^"]*"' | cut -d'"' -f4)
           
           if [ -z "$CHAT_ID" ]; then
@@ -111,7 +113,7 @@ jobs:
           
           # Join participant
           echo "Joining participant..."
-          JOIN_RESPONSE=$(curl -s -X POST http://localhost:8080/chats/$CHAT_ID/join \
+          JOIN_RESPONSE=$(curl -fsS -X POST http://localhost:8080/chats/$CHAT_ID/join \
             -H "Content-Type: application/json" \
             -d '{"participantName":"MemoryTester"}')
           
@@ -130,7 +132,7 @@ jobs:
           echo "Posting $MESSAGE_COUNT messages..."
           BATCH_SIZE=100
           for i in $(seq 1 $MESSAGE_COUNT); do
-            curl -s -X POST http://localhost:8080/chats/$CHAT_ID/messages \
+            curl -fsS -X POST http://localhost:8080/chats/$CHAT_ID/messages \
               -H "Content-Type: application/json" \
               -d "{\"messageParticipantId\":$PARTICIPANT_ID,\"messageText\":\"Message $i\"}" > /dev/null
             
@@ -142,6 +144,33 @@ jobs:
           
           echo "All messages posted"
           get_memory "messages_complete"
+
+          echo "Verifying persisted event count..."
+          EVENTS_RESPONSE=$(curl -fsS "http://localhost:8080/chats/$CHAT_ID/events?offset=0")
+          EVENT_COUNT=$(EVENTS_RESPONSE="$EVENTS_RESPONSE" python - <<'PY'
+          import json
+          import os
+          import sys
+          try:
+              payload = json.loads(os.environ["EVENTS_RESPONSE"])
+              print(len(payload["events"]))
+          except (json.JSONDecodeError, KeyError) as err:
+              print("Failed to parse events response: {}".format(err), file=sys.stderr)
+              sys.exit(1)
+          PY
+          )
+          if [ -z "$EVENT_COUNT" ]; then
+            echo "Failed to determine persisted event count"
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
+          EXPECTED_COUNT=$((MESSAGE_COUNT + 1))
+          if [ "$EVENT_COUNT" -ne "$EXPECTED_COUNT" ]; then
+            echo "Expected $EXPECTED_COUNT events but found $EVENT_COUNT"
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
+          echo "Verified $EVENT_COUNT persisted events"
           
           # Wait and monitor
           echo "Waiting ${WAIT_TIME}s and monitoring memory..."

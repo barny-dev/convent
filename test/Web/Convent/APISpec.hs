@@ -2,7 +2,7 @@
 module Web.Convent.APISpec (spec) where
 
 import Test.Hspec
-import qualified Data.ByteString as BS
+import qualified Data.Text as Text
 import System.Directory (doesDirectoryExist, doesFileExist)
 import System.IO.Temp (withSystemTempDirectory)
 import qualified Data.UUID as UUID
@@ -72,6 +72,33 @@ spec = describe "API" $ do
         case eventsResult of
           Left err -> expectationFailure $ "Get events failed: " ++ err
           Right evts -> length evts `shouldBe` 2
+
+    it "should persist many posted messages across events pages" $ do
+      withSystemTempDirectory "convent-test" $ \tmpDir -> do
+        let config = ChatStoreConfig { ChatStore.chatsDirectory = tmpDir ++ "/chats" }
+            messageCount = 1500  -- Large enough to span multiple 8KB events pages
+            expectedJoinEvents = 1
+        store <- newChatStore config
+
+        uuid <- ChatStore.createChat store
+
+        joinResult <- ChatStore.joinChatParticipant store uuid "Alice"
+        case joinResult of
+          Left err -> expectationFailure $ "Join failed: " ++ err
+          Right (participantId, offset) -> do
+            offset `shouldBe` 0
+
+            mapM_ (\ix -> do
+              postResult <- ChatStore.postChatMessage store uuid participantId (Text.pack ("Hello " ++ show ix))
+              case postResult of
+                Left postErr -> expectationFailure $ "Post failed at message " ++ show ix ++ ": " ++ postErr
+                Right eventOffset -> eventOffset `shouldBe` fromIntegral ix
+              ) [1 .. messageCount]
+
+            eventsResult <- ChatStore.getChatEvents store uuid 0
+            case eventsResult of
+              Left getErr -> expectationFailure $ "Get events failed: " ++ getErr
+              Right evts -> length evts `shouldBe` messageCount + expectedJoinEvents
     
     it "should handle chat existence check" $ do
       withSystemTempDirectory "convent-test" $ \tmpDir -> do
