@@ -35,10 +35,10 @@ createChatFiles chatDir = do
       eventsPath = chatDir ++ "/events.dat"
 
   IO.withBinaryFile indexPath IO.WriteMode $ \indexHandle -> do
-    either (error . show) (const $ return ()) =<<
+    either (\err -> error ("Failed to initialize chat index file " ++ indexPath ++ ": " ++ show err)) (const $ return ()) =<<
       FilePage.write indexHandle (FilePage.Index 0, FilePage.Size 8192) (IndexPage.toByteString IndexPage.emptyPage)
   IO.withBinaryFile eventsPath IO.WriteMode $ \eventsHandle -> do
-    either (error . show) (const $ return ()) =<<
+    either (\err -> error ("Failed to initialize chat events file " ++ eventsPath ++ ": " ++ show err)) (const $ return ()) =<<
       FilePage.write eventsHandle (FilePage.Index 0, FilePage.Size 8192) (EventsPage.toByteString EventsPage.emptyPage)
 
 -- | Initialize ChatData from file handles
