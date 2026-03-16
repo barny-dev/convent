@@ -1,111 +1,221 @@
 
 {-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE DeriveGeneric #-}
 module Web.Convent.Storage.ChatStore
   ( ChatStore
-  , ChatData(..)
+  , ChatStoreConfig(..)
+  , ChatData
   , newChatStore
-  , withChatLock
-  , getHighestEventOffset
+  , loadExistingChats
+  , createChat
+  , chatExists
+  , joinChatParticipant
+  , postChatMessage
+  , getChatEvents
+  , EventResponse
   ) where
 
-import Control.Monad.Trans.Class (lift)
 import Control.Concurrent.MVar
-import Control.Exception (bracket)
-import Control.Monad.Trans.Except (ExceptT (..), except, withExceptT, throwE, catchE, runExceptT)
+import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
+import Control.Monad.Trans.Class (lift)
 import qualified Data.Map.Strict as Map
 import Data.UUID (UUID)
+import qualified Data.UUID as UUID
+import qualified Data.UUID.V4 as UUID.V4
 import Data.Word (Word64)
-import System.IO (Handle, hFileSize)
-import Web.Convent.Storage.IndexPage (IndexPage)
-import Data.Maybe (maybe)
-import qualified Web.Convent.Storage.IndexPage as IndexPage
-import Web.Convent.Storage.EventsPage (EventsPage)
-import qualified Web.Convent.Storage.EventsPage as EventsPage
-import Web.Convent.Storage.EventStore
-import qualified Web.Convent.Storage.FilePage as FilePage
+import Data.Text (Text)
+import System.IO (openBinaryFile, hClose, IOMode(..))
+import System.Directory (doesDirectoryExist, listDirectory, doesFileExist)
+import qualified Web.Convent.Storage.ChatFileOps as ChatFileOps
+import Web.Convent.Storage.ChatDataOps
+import qualified Web.Convent.Events.ParticipantJoinedEvent as ParticipantJoinedEvent
+import qualified Web.Convent.Events.MessageSubmittedEvent as MessageSubmittedEvent
 
--- | Represents data associated with a single chat
-data ChatData = ChatData
-  { indexHandle :: Handle            -- ^ Handle to the index file
-  , eventsHandle :: Handle          -- ^ Handle to the events file
-  , cachedIndexPages :: Map.Map Int IndexPage  -- ^ Currently loaded index pages
-  , cachedEventPages :: Map.Map Int EventsPage -- ^ Currently loaded event pages
-  , indexPageCount :: Int            -- ^ Number of index pages
-  , eventsPageCount :: Int           -- ^ Number of events pages
+-- | Configuration for ChatStore
+data ChatStoreConfig = ChatStoreConfig
+  { chatsDirectory :: FilePath  -- ^ Base directory for storing chat data
+  } deriving (Show, Eq)
+
+-- | Thread-safe store of active chat data with configuration
+data ChatStore = ChatStore 
+  { chatStoreData :: MVar (Map.Map UUID (MVar ChatData))
+  , chatStoreConfig :: ChatStoreConfig
   }
 
-data ChatStoreError = EventsFileCorrupted | IndexFileCorrupted deriving (Show, Eq)
--- | Given a index file handle and events file handle, creates new ChatData, making sure to load the last page of each file. Page size is 8192 bytes in both cases, so the page count can be calculated by dividing the file size by 8192.
-initChatData :: Handle -> Handle -> IO (Either ChatStoreError ChatData)
-initChatData indexHandle eventsHandle = runExceptT $ do
-  -- Get file sizes for index and events files
-    indexSize <- lift $ hFileSize indexHandle
-    eventsSize <- lift $ hFileSize eventsHandle
-  -- Calculate page counts
-    let indexPageCount = fromIntegral (indexSize `div` 8192)
-        eventsPageCount = fromIntegral (eventsSize `div` 8192)  
-  -- Read last index page if available
-    maybeLastIndexPage :: Maybe IndexPage <- if indexPageCount > 0
-                          then withExceptT (const IndexFileCorrupted) $
-                               fmap Just . ExceptT $
-                               FilePage.load indexHandle (FilePage.Index (indexPageCount - 1), FilePage.Size 8192)
-                          else return Nothing
-  -- Read last events page if available
-    maybeLastEventsPage :: Maybe EventsPage <- if eventsPageCount > 0
-                           then withExceptT (const EventsFileCorrupted) $
-                                fmap Just . ExceptT $
-                                FilePage.load eventsHandle (FilePage.Index (eventsPageCount - 1), FilePage.Size 8192)
-                           else return Nothing
-  -- Cache the pages
-    let cachedIndexPages = case maybeLastIndexPage of
-                             Just page -> Map.singleton (indexPageCount - 1) page
-                             Nothing -> Map.empty
-        cachedEventPages = case maybeLastEventsPage of
-                             Just page -> Map.singleton (eventsPageCount - 1) page
-                             Nothing -> Map.empty
-  -- Create and return ChatData
-    return ChatData { indexHandle = indexHandle
-                  , eventsHandle = eventsHandle
-                  , cachedIndexPages = cachedIndexPages
-                  , cachedEventPages = cachedEventPages
-                  , indexPageCount = indexPageCount
-                  , eventsPageCount = eventsPageCount
-                  }
+-- | Creates a new empty chat store with configuration
+newChatStore :: ChatStoreConfig -> IO ChatStore
+newChatStore config = do
+  chatsMap <- newMVar Map.empty
+  return $ ChatStore chatsMap config
 
--- | Thread-safe store of chat data
-newtype ChatStore = ChatStore (MVar (Map.Map UUID (MVar ChatData)))
+-- | Load all existing chats from disk into memory
+-- Should be called at startup to populate the store
+loadExistingChats :: ChatStore -> IO (Either String Int)
+loadExistingChats store@(ChatStore dataMVar config) = runExceptT $ do
+  let baseDir = chatsDirectory config
+  
+  -- Check if base directory exists
+  baseDirExists <- lift $ doesDirectoryExist baseDir
+  if not baseDirExists
+    then return 0  -- No chats to load
+    else do
+      -- List all directories in the chats directory
+      entries <- lift $ listDirectory baseDir
+      
+      -- Try to load each directory as a chat
+      let loadChat dirName = do
+            case UUID.fromString dirName of
+              Nothing -> return Nothing  -- Not a valid UUID, skip
+              Just uuid -> do
+                let chatDir = baseDir ++ "/" ++ dirName
+                    indexPath = chatDir ++ "/index.dat"
+                    eventsPath = chatDir ++ "/events.dat"
+                
+                -- Check if both required files exist
+                indexExists <- doesFileExist indexPath
+                eventsExists <- doesFileExist eventsPath
+                
+                if indexExists && eventsExists
+                  then do
+                    -- Open handles
+                    indexHandle <- openBinaryFile indexPath ReadWriteMode
+                    eventsHandle <- openBinaryFile eventsPath ReadWriteMode
+                    
+                    -- Initialize ChatData
+                    eitherChatData <- ChatFileOps.initChatDataFromFiles indexHandle eventsHandle
+                    
+                    case eitherChatData of
+                      Left _ -> do
+                        -- Failed to load, close handles
+                        hClose indexHandle
+                        hClose eventsHandle
+                        return Nothing
+                      Right chatData -> do
+                        -- Create MVar and add to store
+                        chatDataMVar <- newMVar chatData
+                        modifyMVar_ dataMVar $ \chatsMap ->
+                          return $ Map.insert uuid chatDataMVar chatsMap
+                        return $ Just uuid
+                  else return Nothing  -- Missing files
+      
+      -- Load all chats
+      maybeUUIDs <- lift $ mapM loadChat entries
+      let loadedUUIDs = [uuid | Just uuid <- maybeUUIDs]
+      
+      return $ length loadedUUIDs
 
--- | Creates a new empty chat store
-newChatStore :: IO ChatStore
-newChatStore = ChatStore <$> newMVar Map.empty
+-- | Creates a new chat with a unique UUID and initializes storage files
+-- The chat is automatically loaded into memory and ready for use
+createChat :: ChatStore -> IO UUID
+createChat (ChatStore dataMVar config) = do
+  -- Generate a new UUID for the chat
+  uuid <- UUID.V4.nextRandom
+  
+  -- Create chat directory using configured base path
+  let chatDir = chatsDirectory config ++ "/" ++ UUID.toString uuid
+  
+  -- Use low-level file operations to create chat files
+  ChatFileOps.createChatFiles chatDir
+  
+  -- Load the new chat into memory (open handles and initialize ChatData)
+  let indexPath = chatDir ++ "/index.dat"
+      eventsPath = chatDir ++ "/events.dat"
+  
+  indexHandle <- openBinaryFile indexPath ReadWriteMode
+  eventsHandle <- openBinaryFile eventsPath ReadWriteMode
+  eitherChatData <- ChatFileOps.initChatDataFromFiles indexHandle eventsHandle
+  
+  case eitherChatData of
+    Left _ -> do
+      -- Failed to initialize, close handles
+      hClose indexHandle
+      hClose eventsHandle
+      error "Failed to initialize newly created chat"
+    Right chatData -> do
+      -- Add to in-memory cache
+      chatDataMVar <- newMVar chatData
+      modifyMVar_ dataMVar $ \chatsMap -> do
+        return $ Map.insert uuid chatDataMVar chatsMap
+      
+      return uuid
 
--- | Executes an action with exclusive access to chat data
-withChatLock :: ChatStore -> UUID -> (ChatData -> IO a) -> IO a
-withChatLock (ChatStore mvar) chatId action = do
-  store <- takeMVar mvar
-  chatLock <- case Map.lookup chatId store of
-    Just lock -> pure lock
-    Nothing -> do
-      lock <- newMVar undefined  -- Placeholder until chat is opened
-      putMVar mvar (Map.insert chatId lock store)
-      pure lock
-  putMVar mvar store
-  bracket
-    (takeMVar chatLock)
-    (putMVar chatLock)
-    action
+-- | Check if a chat exists - uses in-memory cache for active chats
+chatExists :: ChatStore -> UUID -> IO Bool
+chatExists (ChatStore dataMVar _) uuid = do
+  -- Check if chat is active in memory (fast path)
+  chatsMap <- readMVar dataMVar
+  return $ Map.member uuid chatsMap
 
--- | Returns the highest event offset in a chat. TODO: this is AI generated garbage, fix it.
-getHighestEventOffset :: ChatStore -> UUID -> IO (Either String Word64)
-getHighestEventOffset store chatId = withChatLock store chatId $
-  \ChatData { indexPageCount = ixPgCnt, cachedIndexPages = ixPgs, cachedEventPages = evPgs, .. } -> runExceptT $ do
-    lastIndexPageOffset <- if ixPgCnt < 1 then throwE "illegal: missing index" else return (ixPgCnt - 1)
-    lastIndexPage <- maybe (throwE "illegal: last index page not loaded") return (Map.lookup lastIndexPageOffset ixPgs)
-    let indexPageEntryCount = IndexPage.entryCount lastIndexPage
-    (eventPageOffset, baseEventOffset) <- case (lastIndexPageOffset, indexPageEntryCount) of
-      (0, 0) -> return (0, 0)
-      (n, 0) -> throwE "illegal: empty last index page"
-      _ -> let lastEntry = IndexPage.entry lastIndexPage (indexPageEntryCount - 1)
-            in return (indexPageEntryCount - 1 + (lastIndexPageOffset * 1024), IndexPage.minimumEventOffset lastEntry)
-    lastEventPage <- maybe (throwE "illegal: last event page not loaded") return (Map.lookup eventPageOffset evPgs)
-    return . fromIntegral $ baseEventOffset + (fromIntegral $ EventsPage.eventCount lastEventPage) - 1
+-- | Execute an action with ChatData for an active chat
+-- IMPORTANT: Chat must already be loaded into memory (via loadExistingChats or createChat)
+-- Throws an error if chat doesn't exist in memory
+withChatData :: ChatStore -> UUID -> (ChatData -> IO (Either String (ChatData, a))) -> IO (Either String a)
+withChatData (ChatStore dataMVar _) uuid action = do
+  -- Get MVar for this chat (must already exist)
+  chatsMap <- readMVar dataMVar
+  case Map.lookup uuid chatsMap of
+    Nothing -> return $ Left "Chat does not exist"  -- Chat not loaded
+    Just chatDataMVar -> do
+      -- Chat exists, work with it
+      chatData <- takeMVar chatDataMVar
+      result <- action chatData
+      case result of
+        Left err -> do
+          -- Put back original on error
+          putMVar chatDataMVar chatData
+          return $ Left err
+        Right (newChatData, value) -> do
+          -- Put back updated ChatData
+          putMVar chatDataMVar newChatData
+          return $ Right value
+
+-- High-level operations for Web API
+
+-- | Join a chat as a participant
+joinChatParticipant :: ChatStore -> UUID -> Text -> IO (Either String (Word64, Word64))
+joinChatParticipant store uuid participantName = 
+  withChatData store uuid $ \chatData -> runExceptT $ do
+    -- Generate participant ID with microsecond precision
+    timestamp <- lift getCurrentTimestamp
+    let pid = timestamp
+    
+    -- Create ParticipantJoinedEvent
+    let event = ParticipantJoinedEvent.Event
+          { ParticipantJoinedEvent.participantId = pid
+          , ParticipantJoinedEvent.timestamp = timestamp
+          , ParticipantJoinedEvent.participantName = participantName
+          }
+    
+    -- Add event using mid-level operation
+    result <- lift $ addEventToChatData chatData (ParticipantJoinedEvent.encode event)
+    (newChatData, eventOffset) <- except result
+    return (newChatData, (pid, eventOffset))
+
+-- | Post a message to a chat
+postChatMessage :: ChatStore -> UUID -> Word64 -> Text -> IO (Either String Word64)
+postChatMessage store uuid participantId messageText = 
+  withChatData store uuid $ \chatData -> runExceptT $ do
+    -- Get current timestamp
+    timestamp <- lift getCurrentTimestamp
+    
+    -- Create MessageSubmittedEvent
+    let event = MessageSubmittedEvent.Event
+          { MessageSubmittedEvent.participantId = participantId
+          , MessageSubmittedEvent.timestamp = timestamp
+          , MessageSubmittedEvent.message = messageText
+          }
+    
+    -- Add event using mid-level operation
+    result <- lift $ addEventToChatData chatData (MessageSubmittedEvent.encode event)
+    (newChatData, eventOffset) <- except result
+    return (newChatData, eventOffset)
+
+-- | Get events from a chat starting from an offset
+getChatEvents :: ChatStore -> UUID -> Word64 -> IO (Either String [EventResponse])
+getChatEvents store uuid startOffset =
+  withChatData store uuid $ \chatData -> do
+    result <- getEventsFromChatData chatData startOffset
+    case result of
+      Left err -> return $ Left err
+      Right events -> return $ Right (chatData, events)
+-- ChatData unchanged for reads

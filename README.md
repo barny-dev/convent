@@ -1,5 +1,7 @@
 # Convent
 
+[![CI](https://github.com/barny-dev/convent/actions/workflows/ci.yml/badge.svg)](https://github.com/barny-dev/convent/actions/workflows/ci.yml)
+
 Convent is an event-based messaging platform built with Haskell. It implements an efficient binary storage format for chat events with indexing capabilities for fast message retrieval.
 
 ## Project Status
