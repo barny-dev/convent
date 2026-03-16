@@ -68,7 +68,7 @@ jobs:
           # Wait for server to be ready
           echo "Waiting for server to start..."
           for i in {1..30}; do
-            if curl -sS http://localhost:8080/chats > /dev/null 2>&1; then
+            if curl -s http://localhost:8080/chats > /dev/null 2>&1; then
               echo "Server is ready!"
               break
             fi
@@ -150,9 +150,20 @@ jobs:
           EVENT_COUNT=$(EVENTS_RESPONSE="$EVENTS_RESPONSE" python - <<'PY'
           import json
           import os
-          print(len(json.loads(os.environ["EVENTS_RESPONSE"])["events"]))
+          import sys
+          try:
+              payload = json.loads(os.environ["EVENTS_RESPONSE"])
+              print(len(payload["events"]))
+          except (json.JSONDecodeError, KeyError) as err:
+              print("Failed to parse events response: {}".format(err), file=sys.stderr)
+              sys.exit(1)
           PY
           )
+          if [ -z "$EVENT_COUNT" ]; then
+            echo "Failed to determine persisted event count"
+            kill $SERVER_PID 2>/dev/null || true
+            exit 1
+          fi
           EXPECTED_COUNT=$((MESSAGE_COUNT + 1))
           if [ "$EVENT_COUNT" -ne "$EXPECTED_COUNT" ]; then
             echo "Expected $EXPECTED_COUNT events but found $EVENT_COUNT"

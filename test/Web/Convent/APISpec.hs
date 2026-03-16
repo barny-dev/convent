@@ -76,29 +76,29 @@ spec = describe "API" $ do
     it "should persist many posted messages across events pages" $ do
       withSystemTempDirectory "convent-test" $ \tmpDir -> do
         let config = ChatStoreConfig { ChatStore.chatsDirectory = tmpDir ++ "/chats" }
-            messageCount = 1500
+            messageCount = 1500  -- Large enough to span multiple 8KB events pages
+            expectedJoinEvents = 1
         store <- newChatStore config
 
         uuid <- ChatStore.createChat store
 
         joinResult <- ChatStore.joinChatParticipant store uuid "Alice"
-        participantId <- case joinResult of
-          Left err -> expectationFailure ("Join failed: " ++ err) >> pure 0
-          Right (pid, offset) -> do
+        case joinResult of
+          Left err -> expectationFailure $ "Join failed: " ++ err
+          Right (participantId, offset) -> do
             offset `shouldBe` 0
-            pure pid
 
-        mapM_ (\ix -> do
-          postResult <- ChatStore.postChatMessage store uuid participantId (Text.pack ("Hello " ++ show ix))
-          case postResult of
-            Left err -> expectationFailure $ "Post failed at message " ++ show ix ++ ": " ++ err
-            Right offset -> offset `shouldBe` fromIntegral ix
-          ) [1 .. messageCount]
+            mapM_ (\ix -> do
+              postResult <- ChatStore.postChatMessage store uuid participantId (Text.pack ("Hello " ++ show ix))
+              case postResult of
+                Left postErr -> expectationFailure $ "Post failed at message " ++ show ix ++ ": " ++ postErr
+                Right eventOffset -> eventOffset `shouldBe` fromIntegral ix
+              ) [1 .. messageCount]
 
-        eventsResult <- ChatStore.getChatEvents store uuid 0
-        case eventsResult of
-          Left err -> expectationFailure $ "Get events failed: " ++ err
-          Right evts -> length evts `shouldBe` messageCount + 1
+            eventsResult <- ChatStore.getChatEvents store uuid 0
+            case eventsResult of
+              Left getErr -> expectationFailure $ "Get events failed: " ++ getErr
+              Right evts -> length evts `shouldBe` messageCount + expectedJoinEvents
     
     it "should handle chat existence check" $ do
       withSystemTempDirectory "convent-test" $ \tmpDir -> do
