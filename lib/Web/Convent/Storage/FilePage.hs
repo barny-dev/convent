@@ -21,7 +21,7 @@ import qualified Prelude as Prelude (IOError)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified System.IO as IO
-import Control.Exception (handle, evaluate, finally)
+import Control.Exception (handle, evaluate, bracket)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT (..), except, withExceptT, throwE, catchE, runExceptT)
 import Data.Kind (Type)
@@ -83,6 +83,8 @@ data WriteError =
 -- Validates that:
 -- * The page index is non-negative
 -- * The data size matches the expected page size
+-- * The written bytes are flushed and synchronised before returning, which
+--   improves durability at the cost of write throughput
 write :: IO.Handle -> Ptr -> ByteString -> IO (Either WriteError ())
 write fh (Index ix, Size ps) pageData = (wrapIOError (\err -> WriteIOError err) write') >>= evaluate
   where write' = runExceptT $! do
@@ -147,9 +149,12 @@ wrapIOError :: (Prelude.IOError -> e) -> IO (Either e a) -> IO (Either e a)
 wrapIOError f io = handle (\err -> return $ Left $! f err) $! io
 
 -- | Synchronise a duplicated file descriptor to durable storage without
--- consuming the original 'Handle', which remains in use by the page store.
+-- consuming the original 'Handle'. 'handleToFd' takes ownership of the
+-- duplicate, so the returned descriptor is bracketed independently while the
+-- page store keeps using the original 'Handle'.
 synchroniseHandle :: IO.Handle -> IO ()
-synchroniseHandle fh = do
-  duplicateHandle <- hDuplicate fh
-  fd <- PosixIO.handleToFd duplicateHandle
-  PosixUnix.fileSynchronise fd `finally` PosixIO.closeFd fd
+synchroniseHandle fh =
+  bracket
+    (PosixIO.handleToFd =<< hDuplicate fh)
+    PosixIO.closeFd
+    PosixUnix.fileSynchronise
