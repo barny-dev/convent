@@ -21,10 +21,13 @@ import qualified Prelude as Prelude (IOError)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified System.IO as IO
-import Control.Exception (handle, evaluate)
+import Control.Exception (handle, evaluate, finally)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT (..), except, withExceptT, throwE, catchE, runExceptT)
 import Data.Kind (Type)
+import GHC.IO.Handle (hDuplicate)
+import qualified System.Posix.IO as Posix
+import qualified System.Posix.Unistd as Posix
 
 -- | Zero-based page index within a file.
 newtype Index = Index Int deriving (Show, Eq)
@@ -93,6 +96,7 @@ write fh (Index ix, Size ps) pageData = (wrapIOError (\err -> WriteIOError err) 
                  lift $ IO.hSeek fh IO.AbsoluteSeek offset
                  lift $ ByteString.hPut fh pageData
                  lift $ IO.hFlush fh
+                 lift $ synchroniseHandle fh
           
 -- | Type class for data structures that can be stored as file pages.
 --
@@ -141,3 +145,9 @@ class FilePage a where
 
 wrapIOError :: (Prelude.IOError -> e) -> IO (Either e a) -> IO (Either e a)
 wrapIOError f io = handle (\err -> return $ Left $! f err) $! io
+
+synchroniseHandle :: IO.Handle -> IO ()
+synchroniseHandle fh = do
+  duplicateHandle <- hDuplicate fh
+  fd <- Posix.handleToFd duplicateHandle
+  Posix.fileSynchronise fd `finally` Posix.closeFd fd
