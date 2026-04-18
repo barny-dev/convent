@@ -26,8 +26,8 @@ import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT (..), except, withExceptT, throwE, catchE, runExceptT)
 import Data.Kind (Type)
 import GHC.IO.Handle (hDuplicate)
-import qualified System.Posix.IO as Posix
-import qualified System.Posix.Unistd as Posix
+import qualified System.Posix.IO as PosixIO
+import qualified System.Posix.Unistd as PosixUnix
 
 -- | Zero-based page index within a file.
 newtype Index = Index Int deriving (Show, Eq)
@@ -146,8 +146,10 @@ class FilePage a where
 wrapIOError :: (Prelude.IOError -> e) -> IO (Either e a) -> IO (Either e a)
 wrapIOError f io = handle (\err -> return $ Left $! f err) $! io
 
+-- | Synchronise a duplicated file descriptor to durable storage without
+-- consuming the original 'Handle', which remains in use by the page store.
 synchroniseHandle :: IO.Handle -> IO ()
 synchroniseHandle fh = do
   duplicateHandle <- hDuplicate fh
-  fd <- Posix.handleToFd duplicateHandle
-  Posix.fileSynchronise fd `finally` Posix.closeFd fd
+  fd <- PosixIO.handleToFd duplicateHandle
+  PosixUnix.fileSynchronise fd `finally` PosixIO.closeFd fd
