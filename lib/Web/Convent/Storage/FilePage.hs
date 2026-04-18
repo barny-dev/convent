@@ -83,8 +83,9 @@ data WriteError =
 -- Validates that:
 -- * The page index is non-negative
 -- * The data size matches the expected page size
--- * The written bytes are flushed and synchronised before returning, which
---   improves durability at the cost of write throughput
+-- * The written bytes are flushed and synchronised through a duplicated file
+--   descriptor before returning, which improves durability at the cost of
+--   write throughput
 write :: IO.Handle -> Ptr -> ByteString -> IO (Either WriteError ())
 write fh (Index ix, Size ps) pageData = (wrapIOError (\err -> WriteIOError err) write') >>= evaluate
   where write' = runExceptT $! do
