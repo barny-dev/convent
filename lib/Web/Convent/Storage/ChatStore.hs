@@ -15,7 +15,7 @@ module Web.Convent.Storage.ChatStore
   , EventResponse
   ) where
 
-import Control.Exception (bracketOnError, onException)
+import Control.Exception (onException)
 import Control.Concurrent.MVar
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import Control.Monad.Trans.Class (lift)
@@ -80,10 +80,8 @@ loadExistingChats store@(ChatStore dataMVar config) = runExceptT $ do
                   then do
                     -- Open file descriptors
                     indexFd <- PosixIO.openFd indexPath PosixIO.ReadWrite PosixIO.defaultFileFlags
-                    eventsFd <- bracketOnError
-                      (PosixIO.openFd eventsPath PosixIO.ReadWrite PosixIO.defaultFileFlags)
-                      (\fd -> PosixIO.closeFd fd >> PosixIO.closeFd indexFd)
-                      return
+                    eventsFd <- PosixIO.openFd eventsPath PosixIO.ReadWrite PosixIO.defaultFileFlags
+                      `onException` PosixIO.closeFd indexFd
                     
                     -- Initialize ChatData
                     eitherChatData <- ChatFileOps.initChatDataFromFds indexFd eventsFd
@@ -127,10 +125,8 @@ createChat (ChatStore dataMVar config) = do
       eventsPath = chatDir ++ "/events.dat"
   
   indexFd <- PosixIO.openFd indexPath PosixIO.ReadWrite PosixIO.defaultFileFlags
-  eventsFd <- bracketOnError
-    (PosixIO.openFd eventsPath PosixIO.ReadWrite PosixIO.defaultFileFlags)
-    (\fd -> PosixIO.closeFd fd >> PosixIO.closeFd indexFd)
-    return
+  eventsFd <- PosixIO.openFd eventsPath PosixIO.ReadWrite PosixIO.defaultFileFlags
+    `onException` PosixIO.closeFd indexFd
   eitherChatData <- ChatFileOps.initChatDataFromFds indexFd eventsFd
     `onException` (PosixIO.closeFd indexFd >> PosixIO.closeFd eventsFd)
   
