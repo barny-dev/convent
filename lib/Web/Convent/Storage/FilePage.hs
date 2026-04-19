@@ -3,7 +3,7 @@
 -- | Low-level file page I/O operations for fixed-size page storage.
 --
 -- This module provides utilities for reading and writing fixed-size pages
--- to file handles, with proper error handling and validation.
+-- to file descriptors, with proper error handling and validation.
 module Web.Convent.Storage.FilePage
   ( read
   , write
@@ -21,12 +21,14 @@ import qualified Prelude as Prelude (IOError)
 import Data.ByteString (ByteString)
 import qualified Data.ByteString as ByteString
 import qualified System.IO as IO
-import Control.Exception (handle, evaluate, bracket)
+import Control.Exception (handle, evaluate)
 import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Except (ExceptT (..), except, withExceptT, throwE, catchE, runExceptT)
 import Data.Kind (Type)
-import GHC.IO.Handle (hDuplicate)
+import qualified System.Posix.Files as PosixFiles
 import qualified System.Posix.IO as PosixIO
+import qualified System.Posix.IO.ByteString as PosixByteString
+import System.Posix.Types (Fd)
 import qualified System.Posix.Unistd as PosixUnix
 
 -- | Zero-based page index within a file.
@@ -43,7 +45,7 @@ data ReadError =
   | ReadIOError Prelude.IOError  -- ^ Low-level I/O error
   deriving (Show, Eq)
 
--- | Read a page from a file handle at the specified index and size.
+-- | Read a page from a file descriptor at the specified index and size.
 --
 -- The page is read from the file at offset @index * pageSize@.
 -- Returns the page data as a 'ByteString' or a 'ReadError' if the operation fails.
@@ -51,21 +53,21 @@ data ReadError =
 -- Validates that:
 -- * The page index is non-negative
 -- * The file is large enough to contain the requested page
-read :: IO.Handle -> Ptr -> IO (Either ReadError ByteString)
-read fh (Index ix, Size ps) = (wrapIOError (\err -> ReadIOError err) read') >>= evaluate
+read :: Fd -> Ptr -> IO (Either ReadError ByteString)
+read fd (Index ix, Size ps) = (wrapIOError (\err -> ReadIOError err) read') >>= evaluate
   where read' = runExceptT $! do 
-                if ix < 0 
-                  then throwE $ ReadInvalidPageIndex (Index ix)
-                  else return ()
-                fileSize <- lift $ IO.hFileSize fh
-                let offset = fromIntegral ix * fromIntegral ps
-                    requiredSize = offset + fromIntegral ps
-                if fileSize < requiredSize
-                  then throwE $ ReadFileTooSmall (fromIntegral requiredSize) (fromIntegral fileSize)
-                  else return ()
-                lift $ IO.hSeek fh IO.AbsoluteSeek offset
-                pageData <- lift $ ByteString.hGet fh (fromIntegral ps)
-                return $! pageData
+                 if ix < 0 
+                   then throwE $ ReadInvalidPageIndex (Index ix)
+                   else return ()
+                 fileSize <- lift $ PosixFiles.fileSize <$> PosixFiles.getFdStatus fd
+                 let offset = fromIntegral ix * fromIntegral ps
+                     requiredSize = offset + fromIntegral ps
+                 if fileSize < requiredSize
+                   then throwE $ ReadFileTooSmall (fromIntegral requiredSize) (fromIntegral fileSize)
+                   else return ()
+                 lift $ PosixIO.fdSeek fd IO.AbsoluteSeek offset
+                 pageData <- lift $ readExact fd (fromIntegral ps)
+                 return $! pageData
 
 -- | Errors that can occur during page write operations.
 data WriteError = 
@@ -75,7 +77,7 @@ data WriteError =
    | WriteIOError Prelude.IOError  -- ^ Low-level I/O error
    deriving (Show, Eq)
 
--- | Write a page to a file handle at the specified index and size.
+-- | Write a page to a file descriptor at the specified index and size.
 --
 -- The page is written to the file at offset @index * pageSize@.
 -- Returns @()@ on success or a 'WriteError' if the operation fails.
@@ -83,23 +85,21 @@ data WriteError =
 -- Validates that:
 -- * The page index is non-negative
 -- * The data size matches the expected page size
--- * The written bytes are flushed and synchronised through a duplicated file
---   descriptor before returning, which improves durability at the cost of
---   write throughput
-write :: IO.Handle -> Ptr -> ByteString -> IO (Either WriteError ())
-write fh (Index ix, Size ps) pageData = (wrapIOError (\err -> WriteIOError err) write') >>= evaluate
+-- * The written bytes are synchronised before returning, which improves
+--   durability at the cost of write throughput
+write :: Fd -> Ptr -> ByteString -> IO (Either WriteError ())
+write fd (Index ix, Size ps) pageData = (wrapIOError (\err -> WriteIOError err) write') >>= evaluate
   where write' = runExceptT $! do
-                 if ix < 0 
-                   then throwE $ WriteInvalidPageIndex (Index ix)
+                  if ix < 0 
+                    then throwE $ WriteInvalidPageIndex (Index ix)
                    else return ()
-                 if fromIntegral ps /= ByteString.length pageData 
-                   then throwE $ WritePageSizeMismatch (Size ps) (Size . fromIntegral $ ByteString.length pageData) 
-                   else return ()
-                 let offset = fromIntegral ix * fromIntegral ps
-                 lift $ IO.hSeek fh IO.AbsoluteSeek offset
-                 lift $ ByteString.hPut fh pageData
-                 lift $ IO.hFlush fh
-                 lift $ synchroniseHandle fh
+                  if fromIntegral ps /= ByteString.length pageData 
+                    then throwE $ WritePageSizeMismatch (Size ps) (Size . fromIntegral $ ByteString.length pageData) 
+                    else return ()
+                  let offset = fromIntegral ix * fromIntegral ps
+                  lift $ PosixIO.fdSeek fd IO.AbsoluteSeek offset
+                  lift $ writeAll fd pageData
+                  lift $ PosixUnix.fileSynchronise fd
           
 -- | Type class for data structures that can be stored as file pages.
 --
@@ -123,25 +123,25 @@ class FilePage a where
   
   -- | Map low-level read errors to page-specific load errors.
   mapReadError :: ReadError -> FilePageLoadError a
-  -- | Load a typed page from a file handle.
+  -- | Load a typed page from a file descriptor.
   --
   -- This is a convenience function that combines 'read' with 'fromByteString'
   -- to load a strongly-typed page from storage.
-  load :: IO.Handle -> Ptr -> IO (Either (FilePageLoadError a) a)
-  load fh ptr = do
-    result <- read fh ptr
+  load :: Fd -> Ptr -> IO (Either (FilePageLoadError a) a)
+  load fd ptr = do
+    result <- read fd ptr
     return $! case result of
         Left err -> Left $! mapReadError err
         Right byteData -> fromByteString $! byteData
-  -- | Save a typed page to a file handle
+  -- | Save a typed page to a file descriptor
   -- This is a convenience function that combines 'write' with 'toByteString'
   -- to save a strongly-typed page to storage
-  save :: IO.Handle -> Ptr -> a -> IO (Either (FilePageSaveError a) ())
-  save fh ptr page = do
+  save :: Fd -> Ptr -> a -> IO (Either (FilePageSaveError a) ())
+  save fd ptr page = do
     case toByteString page of
       Left err -> return $ Left err
       Right bs -> do 
-        result <- write fh ptr bs
+        result <- write fd ptr bs
         return $ case result of
           Left err' -> Left $ mapWriteError err'
           Right () -> Right ()
@@ -149,13 +149,21 @@ class FilePage a where
 wrapIOError :: (Prelude.IOError -> e) -> IO (Either e a) -> IO (Either e a)
 wrapIOError f io = handle (\err -> return $ Left $! f err) $! io
 
--- | Synchronise a duplicated file descriptor to durable storage without
--- consuming the original 'Handle'. 'handleToFd' takes ownership of the
--- duplicate, so the returned descriptor is bracketed independently while the
--- page store keeps using the original 'Handle'.
-synchroniseHandle :: IO.Handle -> IO ()
-synchroniseHandle fh =
-  bracket
-    (PosixIO.handleToFd =<< hDuplicate fh)
-    PosixIO.closeFd
-    PosixUnix.fileSynchronise
+readExact :: Fd -> Int -> IO ByteString
+readExact fd byteCount = go byteCount []
+  where
+    go remaining chunks
+      | remaining <= 0 = return $ ByteString.concat (reverse chunks)
+      | otherwise = do
+          chunk <- PosixByteString.fdRead fd (fromIntegral remaining)
+          if ByteString.null chunk
+            then return $ ByteString.concat (reverse chunks)
+            else go (remaining - ByteString.length chunk) (chunk : chunks)
+
+writeAll :: Fd -> ByteString -> IO ()
+writeAll _ bs | ByteString.null bs = return ()
+writeAll fd bs = do
+  written <- PosixByteString.fdWrite fd bs
+  if written == 0
+    then ioError (userError "short write")
+    else writeAll fd (ByteString.drop (fromIntegral written) bs)

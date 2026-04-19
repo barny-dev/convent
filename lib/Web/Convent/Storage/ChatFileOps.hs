@@ -3,16 +3,18 @@
 -- Handles direct file creation and initialization
 module Web.Convent.Storage.ChatFileOps
   ( createChatFiles
-  , initChatDataFromFiles
+  , initChatDataFromFds
   , ChatFileError(..)
   ) where
 
+import Control.Exception (bracket)
 import Control.Monad.Trans.Except (ExceptT(..), runExceptT, withExceptT)
 import Control.Monad.Trans.Class (lift)
-import System.IO (Handle, hFileSize)
-import qualified System.IO as IO
 import System.Directory (createDirectoryIfMissing)
 import qualified Data.Map.Strict as Map
+import qualified System.Posix.Files as PosixFiles
+import qualified System.Posix.IO as PosixIO
+import System.Posix.Types (Fd)
 import Web.Convent.Storage.IndexPage (IndexPage)
 import qualified Web.Convent.Storage.IndexPage as IndexPage
 import Web.Convent.Storage.EventsPage (EventsPage)
@@ -34,20 +36,24 @@ createChatFiles chatDir = do
   let indexPath = chatDir ++ "/index.dat"
       eventsPath = chatDir ++ "/events.dat"
 
-  IO.withBinaryFile indexPath IO.WriteMode $ \indexHandle -> do
+  let createFlags = PosixIO.defaultFileFlags
+        { PosixIO.trunc = True
+        , PosixIO.creat = Just PosixFiles.ownerModes
+        }
+  bracket (PosixIO.openFd indexPath PosixIO.WriteOnly createFlags) PosixIO.closeFd $ \indexFd -> do
     either (\err -> error ("Failed to initialize chat index file " ++ indexPath ++ ": " ++ show err)) (const $ return ()) =<<
-      FilePage.write indexHandle (FilePage.Index 0, FilePage.Size 8192) (IndexPage.toByteString IndexPage.emptyPage)
-  IO.withBinaryFile eventsPath IO.WriteMode $ \eventsHandle -> do
+      FilePage.write indexFd (FilePage.Index 0, FilePage.Size 8192) (IndexPage.toByteString IndexPage.emptyPage)
+  bracket (PosixIO.openFd eventsPath PosixIO.WriteOnly createFlags) PosixIO.closeFd $ \eventsFd -> do
     either (\err -> error ("Failed to initialize chat events file " ++ eventsPath ++ ": " ++ show err)) (const $ return ()) =<<
-      FilePage.write eventsHandle (FilePage.Index 0, FilePage.Size 8192) (EventsPage.toByteString EventsPage.emptyPage)
+      FilePage.write eventsFd (FilePage.Index 0, FilePage.Size 8192) (EventsPage.toByteString EventsPage.emptyPage)
 
--- | Initialize ChatData from file handles
+-- | Initialize ChatData from file descriptors
 -- Reads file sizes, calculates page counts, and caches the last page of each file
-initChatDataFromFiles :: Handle -> Handle -> IO (Either ChatFileError ChatData)
-initChatDataFromFiles indexHandle eventsHandle = runExceptT $ do
+initChatDataFromFds :: Fd -> Fd -> IO (Either ChatFileError ChatData)
+initChatDataFromFds indexFd eventsFd = runExceptT $ do
   -- Get file sizes for index and events files
-  indexSize <- lift $ hFileSize indexHandle
-  eventsSize <- lift $ hFileSize eventsHandle
+  indexSize <- lift $ PosixFiles.fileSize <$> PosixFiles.getFdStatus indexFd
+  eventsSize <- lift $ PosixFiles.fileSize <$> PosixFiles.getFdStatus eventsFd
   
   -- Calculate page counts
   let indexPageCount = fromIntegral (indexSize `div` 8192)
@@ -58,7 +64,7 @@ initChatDataFromFiles indexHandle eventsHandle = runExceptT $ do
     if indexPageCount > 0
       then withExceptT (const IndexFileCorrupted) $
            fmap Just . ExceptT $
-           FilePage.load indexHandle (FilePage.Index (indexPageCount - 1), FilePage.Size 8192)
+           FilePage.load indexFd (FilePage.Index (indexPageCount - 1), FilePage.Size 8192)
       else return Nothing
       
   -- Read last events page if available
@@ -66,7 +72,7 @@ initChatDataFromFiles indexHandle eventsHandle = runExceptT $ do
     if eventsPageCount > 0
       then withExceptT (const EventsFileCorrupted) $
            fmap Just . ExceptT $
-           FilePage.load eventsHandle (FilePage.Index (eventsPageCount - 1), FilePage.Size 8192)
+           FilePage.load eventsFd (FilePage.Index (eventsPageCount - 1), FilePage.Size 8192)
       else return Nothing
       
   -- Cache the pages
@@ -79,8 +85,8 @@ initChatDataFromFiles indexHandle eventsHandle = runExceptT $ do
                            
   -- Create and return ChatData
   return ChatData 
-    { chatDataIndexHandle = indexHandle
-    , chatDataEventsHandle = eventsHandle
+    { chatDataIndexFd = indexFd
+    , chatDataEventsFd = eventsFd
     , chatDataCachedIndexPages = cachedIndexPages
     , chatDataCachedEventPages = cachedEventPages
     , chatDataIndexPageCount = indexPageCount
