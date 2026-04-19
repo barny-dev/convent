@@ -15,7 +15,7 @@ module Web.Convent.Storage.ChatStore
   , EventResponse
   ) where
 
-import Control.Exception (onException)
+import Control.Exception (bracketOnError)
 import Control.Concurrent.MVar
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import Control.Monad.Trans.Class (lift)
@@ -80,12 +80,16 @@ loadExistingChats store@(ChatStore dataMVar config) = runExceptT $ do
                   then do
                     -- Open file descriptors
                     indexFd <- PosixIO.openFd indexPath PosixIO.ReadWrite PosixIO.defaultFileFlags
-                    eventsFd <- PosixIO.openFd eventsPath PosixIO.ReadWrite PosixIO.defaultFileFlags
-                      `onException` PosixIO.closeFd indexFd
+                    eventsFd <- bracketOnError
+                      (PosixIO.openFd eventsPath PosixIO.ReadWrite PosixIO.defaultFileFlags)
+                      (const $ PosixIO.closeFd indexFd)
+                      return
                     
                     -- Initialize ChatData
-                    eitherChatData <- ChatFileOps.initChatDataFromFds indexFd eventsFd
-                      `onException` (PosixIO.closeFd indexFd >> PosixIO.closeFd eventsFd)
+                    eitherChatData <- bracketOnError
+                      (ChatFileOps.initChatDataFromFds indexFd eventsFd)
+                      (const $ PosixIO.closeFd indexFd >> PosixIO.closeFd eventsFd)
+                      return
                     
                     case eitherChatData of
                       Left _ -> do
@@ -125,10 +129,14 @@ createChat (ChatStore dataMVar config) = do
       eventsPath = chatDir ++ "/events.dat"
   
   indexFd <- PosixIO.openFd indexPath PosixIO.ReadWrite PosixIO.defaultFileFlags
-  eventsFd <- PosixIO.openFd eventsPath PosixIO.ReadWrite PosixIO.defaultFileFlags
-    `onException` PosixIO.closeFd indexFd
-  eitherChatData <- ChatFileOps.initChatDataFromFds indexFd eventsFd
-    `onException` (PosixIO.closeFd indexFd >> PosixIO.closeFd eventsFd)
+  eventsFd <- bracketOnError
+    (PosixIO.openFd eventsPath PosixIO.ReadWrite PosixIO.defaultFileFlags)
+    (const $ PosixIO.closeFd indexFd)
+    return
+  eitherChatData <- bracketOnError
+    (ChatFileOps.initChatDataFromFds indexFd eventsFd)
+    (const $ PosixIO.closeFd indexFd >> PosixIO.closeFd eventsFd)
+    return
   
   case eitherChatData of
     Left _ -> do

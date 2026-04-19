@@ -165,5 +165,5 @@ writeAll _ bs | ByteString.null bs = return ()
 writeAll fd bs = do
   written <- PosixByteString.fdWrite fd bs
   if written == 0
-    then ioError (userError "short write")
+    then ioError (userError "Failed to write data: unexpected short write (0 bytes written)")
     else writeAll fd (ByteString.drop (fromIntegral written) bs)
