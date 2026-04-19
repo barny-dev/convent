@@ -15,7 +15,7 @@ module Web.Convent.Storage.ChatStore
   , EventResponse
   ) where
 
-import Control.Exception (bracketOnError)
+import Control.Exception (bracketOnError, onException)
 import Control.Concurrent.MVar
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import Control.Monad.Trans.Class (lift)
@@ -82,14 +82,12 @@ loadExistingChats store@(ChatStore dataMVar config) = runExceptT $ do
                     indexFd <- PosixIO.openFd indexPath PosixIO.ReadWrite PosixIO.defaultFileFlags
                     eventsFd <- bracketOnError
                       (PosixIO.openFd eventsPath PosixIO.ReadWrite PosixIO.defaultFileFlags)
-                      (const $ PosixIO.closeFd indexFd)
+                      (\fd -> PosixIO.closeFd fd >> PosixIO.closeFd indexFd)
                       return
                     
                     -- Initialize ChatData
-                    eitherChatData <- bracketOnError
-                      (ChatFileOps.initChatDataFromFds indexFd eventsFd)
-                      (const $ PosixIO.closeFd indexFd >> PosixIO.closeFd eventsFd)
-                      return
+                    eitherChatData <- ChatFileOps.initChatDataFromFds indexFd eventsFd
+                      `onException` (PosixIO.closeFd indexFd >> PosixIO.closeFd eventsFd)
                     
                     case eitherChatData of
                       Left _ -> do
@@ -131,12 +129,10 @@ createChat (ChatStore dataMVar config) = do
   indexFd <- PosixIO.openFd indexPath PosixIO.ReadWrite PosixIO.defaultFileFlags
   eventsFd <- bracketOnError
     (PosixIO.openFd eventsPath PosixIO.ReadWrite PosixIO.defaultFileFlags)
-    (const $ PosixIO.closeFd indexFd)
+    (\fd -> PosixIO.closeFd fd >> PosixIO.closeFd indexFd)
     return
-  eitherChatData <- bracketOnError
-    (ChatFileOps.initChatDataFromFds indexFd eventsFd)
-    (const $ PosixIO.closeFd indexFd >> PosixIO.closeFd eventsFd)
-    return
+  eitherChatData <- ChatFileOps.initChatDataFromFds indexFd eventsFd
+    `onException` (PosixIO.closeFd indexFd >> PosixIO.closeFd eventsFd)
   
   case eitherChatData of
     Left _ -> do

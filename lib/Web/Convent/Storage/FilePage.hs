@@ -149,6 +149,8 @@ class FilePage a where
 wrapIOError :: (Prelude.IOError -> e) -> IO (Either e a) -> IO (Either e a)
 wrapIOError f io = handle (\err -> return $ Left $! f err) $! io
 
+-- | Read exactly the requested number of bytes from an 'Fd', retrying until
+-- that many bytes have been collected or EOF is reached.
 readExact :: Fd -> Int -> IO ByteString
 readExact fd byteCount = go byteCount []
   where
@@ -160,6 +162,8 @@ readExact fd byteCount = go byteCount []
             then return $ ByteString.concat (reverse chunks)
             else go (remaining - ByteString.length chunk) (chunk : chunks)
 
+-- | Write an entire 'ByteString' to an 'Fd', retrying after partial writes.
+-- Raises an IO error if the OS reports a zero-byte write for non-empty input.
 writeAll :: Fd -> ByteString -> IO ()
 writeAll _ bs | ByteString.null bs = return ()
 writeAll fd bs = do
