@@ -15,6 +15,7 @@ module Web.Convent.Storage.ChatStore
   , EventResponse
   ) where
 
+import Control.Exception (onException)
 import Control.Concurrent.MVar
 import Control.Monad.Trans.Except (ExceptT (..), except, runExceptT)
 import Control.Monad.Trans.Class (lift)
@@ -24,8 +25,8 @@ import qualified Data.UUID as UUID
 import qualified Data.UUID.V4 as UUID.V4
 import Data.Word (Word64)
 import Data.Text (Text)
-import System.IO (openBinaryFile, hClose, IOMode(..))
 import System.Directory (doesDirectoryExist, listDirectory, doesFileExist)
+import qualified System.Posix.IO as PosixIO
 import qualified Web.Convent.Storage.ChatFileOps as ChatFileOps
 import Web.Convent.Storage.ChatDataOps
 import qualified Web.Convent.Events.ParticipantJoinedEvent as ParticipantJoinedEvent
@@ -77,18 +78,20 @@ loadExistingChats store@(ChatStore dataMVar config) = runExceptT $ do
                 
                 if indexExists && eventsExists
                   then do
-                    -- Open handles
-                    indexHandle <- openBinaryFile indexPath ReadWriteMode
-                    eventsHandle <- openBinaryFile eventsPath ReadWriteMode
+                    -- Open file descriptors
+                    indexFd <- PosixIO.openFd indexPath PosixIO.ReadWrite PosixIO.defaultFileFlags
+                    eventsFd <- PosixIO.openFd eventsPath PosixIO.ReadWrite PosixIO.defaultFileFlags
+                      `onException` PosixIO.closeFd indexFd
                     
                     -- Initialize ChatData
-                    eitherChatData <- ChatFileOps.initChatDataFromFiles indexHandle eventsHandle
+                    eitherChatData <- ChatFileOps.initChatDataFromFds indexFd eventsFd
+                      `onException` (PosixIO.closeFd indexFd >> PosixIO.closeFd eventsFd)
                     
                     case eitherChatData of
                       Left _ -> do
-                        -- Failed to load, close handles
-                        hClose indexHandle
-                        hClose eventsHandle
+                        -- Failed to load, close descriptors
+                        PosixIO.closeFd indexFd
+                        PosixIO.closeFd eventsFd
                         return Nothing
                       Right chatData -> do
                         -- Create MVar and add to store
@@ -117,19 +120,21 @@ createChat (ChatStore dataMVar config) = do
   -- Use low-level file operations to create chat files
   ChatFileOps.createChatFiles chatDir
   
-  -- Load the new chat into memory (open handles and initialize ChatData)
+  -- Load the new chat into memory (open file descriptors and initialize ChatData)
   let indexPath = chatDir ++ "/index.dat"
       eventsPath = chatDir ++ "/events.dat"
   
-  indexHandle <- openBinaryFile indexPath ReadWriteMode
-  eventsHandle <- openBinaryFile eventsPath ReadWriteMode
-  eitherChatData <- ChatFileOps.initChatDataFromFiles indexHandle eventsHandle
+  indexFd <- PosixIO.openFd indexPath PosixIO.ReadWrite PosixIO.defaultFileFlags
+  eventsFd <- PosixIO.openFd eventsPath PosixIO.ReadWrite PosixIO.defaultFileFlags
+    `onException` PosixIO.closeFd indexFd
+  eitherChatData <- ChatFileOps.initChatDataFromFds indexFd eventsFd
+    `onException` (PosixIO.closeFd indexFd >> PosixIO.closeFd eventsFd)
   
   case eitherChatData of
     Left _ -> do
-      -- Failed to initialize, close handles
-      hClose indexHandle
-      hClose eventsHandle
+      -- Failed to initialize, close descriptors
+      PosixIO.closeFd indexFd
+      PosixIO.closeFd eventsFd
       error "Failed to initialize newly created chat"
     Right chatData -> do
       -- Add to in-memory cache
