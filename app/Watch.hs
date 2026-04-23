@@ -6,11 +6,9 @@ module Main where
 import Control.Concurrent (threadDelay)
 import Data.Aeson (FromJSON(..), ToJSON, eitherDecode, withObject, (.:), encode)
 import qualified Data.ByteString.Lazy.Char8 as BL8
-import qualified Data.Text as Text
 import Data.Text (Text)
 import GHC.Generics (Generic)
 import Network.HTTP.Simple
-import Network.HTTP.Types.Status (statusCode)
 import System.Environment (getArgs)
 import System.IO (hPutStrLn, stderr, stdout, hFlush)
 import Text.Read (readMaybe)
@@ -77,7 +75,7 @@ fetchEvents :: String -> String -> Integer -> IO (Either String [EventItem])
 fetchEvents baseUrl chatId offset = do
   request <- parseRequest (baseUrl ++ "/chats/" ++ chatId ++ "/events?offset=" ++ show offset)
   response <- httpLBS request
-  let code = statusCode (getResponseStatus response)
+  let code = getResponseStatusCode response
   if code /= 200
     then return $ Left ("HTTP error " ++ show code ++ " while fetching events")
     else case eitherDecode (getResponseBody response) of
