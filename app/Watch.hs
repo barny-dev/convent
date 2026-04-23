@@ -4,9 +4,10 @@
 module Main where
 
 import Control.Concurrent (threadDelay)
-import Data.Aeson (FromJSON(..), ToJSON, eitherDecode, withObject, (.:), encode)
+import Data.Aeson (FromJSON(..), ToJSON(..), eitherDecode, withObject, (.:), (.=), object, encode)
 import qualified Data.ByteString.Lazy.Char8 as BL8
 import Data.Text (Text)
+import qualified Data.UUID as UUID
 import GHC.Generics (Generic)
 import Network.HTTP.Simple
 import System.Environment (getArgs)
@@ -15,11 +16,13 @@ import Text.Read (readMaybe)
 
 data EventItem = EventItem
   { eventOffset :: Integer
-  , eventType :: Integer
+  , eventTypeId :: Integer
   , eventData :: Text
   } deriving (Show, Generic)
 
-instance ToJSON EventItem
+instance ToJSON EventItem where
+  toJSON (EventItem offset typ dat) =
+    object ["eventOffset" .= offset, "eventType" .= typ, "eventData" .= dat]
 
 instance FromJSON EventItem where
   parseJSON = withObject "EventItem" $ \v ->
@@ -38,14 +41,19 @@ main :: IO ()
 main = do
   args <- getArgs
   case args of
-    [baseUrl, chatId] ->
-      watchLoop (normalizeBaseUrl baseUrl) chatId 0
-    [baseUrl, chatId, startOffsetArg] ->
+    [baseUrl, chatIdArg] ->
+      runWatch (normalizeBaseUrl baseUrl) chatIdArg 0
+    [baseUrl, chatIdArg, startOffsetArg] ->
       case readMaybe startOffsetArg of
-        Just startOffset | startOffset >= 0 ->
-          watchLoop (normalizeBaseUrl baseUrl) chatId startOffset
+        Just startOffset | startOffset >= 0 -> runWatch (normalizeBaseUrl baseUrl) chatIdArg startOffset
         _ -> usage "startOffset must be a non-negative integer."
     _ -> usage "Invalid arguments."
+
+runWatch :: String -> String -> Integer -> IO ()
+runWatch baseUrl chatIdArg startOffset =
+  case parseChatId chatIdArg of
+    Left err -> usage err
+    Right chatId -> watchLoop baseUrl chatId startOffset
 
 usage :: String -> IO ()
 usage err = do
@@ -93,6 +101,12 @@ normalizeBaseUrl url =
   in case reversed of
        '/':rest -> reverse rest
        _ -> url
+
+parseChatId :: String -> Either String String
+parseChatId raw =
+  case UUID.fromString raw of
+    Nothing -> Left "chatId must be a valid UUID."
+    Just uuid -> Right (UUID.toString uuid)
 
 pollDelayMicros :: Int
 pollDelayMicros = 1000000
