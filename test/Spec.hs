@@ -9,6 +9,7 @@ import qualified Web.Convent.Events.ParticipantLeftEventSpec as ParticipantLeftE
 import qualified Web.Convent.Events.MessageSubmittedEventSpec as MessageSubmittedEventSpec
 import qualified Web.Convent.Events.ChatFlowSpec as ChatFlowSpec
 import qualified Web.Convent.APISpec as APISpec
+import qualified Web.Convent.AuthSpec as AuthSpec
 
 main :: IO ()
 main = hspec $ do
@@ -20,3 +21,4 @@ main = hspec $ do
   describe "MessageSubmittedEvent" MessageSubmittedEventSpec.spec
   describe "ChatFlow" ChatFlowSpec.spec
   describe "API" APISpec.spec
+  describe "Auth" AuthSpec.spec

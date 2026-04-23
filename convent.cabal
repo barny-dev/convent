@@ -35,6 +35,7 @@ library
                     , Web.Convent.Events.ParticipantJoinedEvent
                     , Web.Convent.Events.ParticipantLeftEvent
                     , Web.Convent.Events.MessageSubmittedEvent
+                    , Web.Convent.Auth
                     , Web.Convent.API
     build-depends:    base >= 4.18 && < 5
                     , bytestring >= 0.11
@@ -75,6 +76,7 @@ test-suite convent-test
                     , Web.Convent.Events.MessageSubmittedEventSpec
                     , Web.Convent.Events.ChatFlowSpec
                     , Web.Convent.APISpec
+                    , Web.Convent.AuthSpec
     hs-source-dirs:   test
     build-depends:    convent
                     , base >= 4.18 && < 5

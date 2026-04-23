@@ -7,7 +7,11 @@
 module Web.Convent.API
   ( API
   , server
+  , AuthHeader
   , ChatId(..)
+  , RegisterRequest(..)
+  , ExchangePasswordRequest(..)
+  , ExchangePasswordResponse(..)
   , CreateChatResponse(..)
   , JoinChatRequest(..)
   , JoinChatResponse(..)
@@ -29,6 +33,8 @@ import Data.Word (Word64)
 import GHC.Generics (Generic)
 import Servant
 
+import Web.Convent.Auth (AuthStore)
+import qualified Web.Convent.Auth as Auth
 import Web.Convent.Storage.ChatStore (ChatStore)
 import qualified Web.Convent.Storage.ChatStore as ChatStore
 import Web.Convent.Storage.ChatDataOps (EventResponse(..))
@@ -62,6 +68,34 @@ data CreateChatResponse = CreateChatResponse
 
 instance ToJSON CreateChatResponse
 instance FromJSON CreateChatResponse
+
+data RegisterRequest = RegisterRequest
+  { username :: Text
+  , password :: Text
+  } deriving (Show, Generic)
+
+instance ToJSON RegisterRequest
+instance FromJSON RegisterRequest
+
+data ExchangePasswordRequest = ExchangePasswordRequest
+  { exchangeUsername :: Text
+  , exchangePassword :: Text
+  } deriving (Show, Generic)
+
+instance ToJSON ExchangePasswordRequest where
+  toJSON (ExchangePasswordRequest u p) =
+    object ["username" .= u, "password" .= p]
+
+instance FromJSON ExchangePasswordRequest where
+  parseJSON = withObject "ExchangePasswordRequest" $ \v ->
+    ExchangePasswordRequest <$> v .: "username" <*> v .: "password"
+
+newtype ExchangePasswordResponse = ExchangePasswordResponse
+  { token :: Text
+  } deriving (Show, Generic)
+
+instance ToJSON ExchangePasswordResponse
+instance FromJSON ExchangePasswordResponse
 
 -- | Request to join a chat
 data JoinChatRequest = JoinChatRequest
@@ -120,28 +154,53 @@ instance FromJSON GetEventsResponse where
 
 -- | API definition
 type API = 
-       "chats" :> Post '[JSON] CreateChatResponse
-  :<|> "chats" :> Capture "id" ChatId :> "join" :> ReqBody '[JSON] JoinChatRequest :> Post '[JSON] JoinChatResponse
-  :<|> "chats" :> Capture "id" ChatId :> "messages" :> ReqBody '[JSON] PostMessageRequest :> Post '[JSON] PostMessageResponse
-  :<|> "chats" :> Capture "id" ChatId :> "events" :> QueryParam "offset" Word64 :> Get '[JSON] GetEventsResponse
+       "users" :> "register" :> ReqBody '[JSON] RegisterRequest :> Post '[JSON] NoContent
+  :<|> "auth" :> "token" :> ReqBody '[JSON] ExchangePasswordRequest :> Post '[JSON] ExchangePasswordResponse
+  :<|> AuthHeader :> "chats" :> Post '[JSON] CreateChatResponse
+  :<|> AuthHeader :> "chats" :> Capture "id" ChatId :> "join" :> ReqBody '[JSON] JoinChatRequest :> Post '[JSON] JoinChatResponse
+  :<|> AuthHeader :> "chats" :> Capture "id" ChatId :> "messages" :> ReqBody '[JSON] PostMessageRequest :> Post '[JSON] PostMessageResponse
+  :<|> AuthHeader :> "chats" :> Capture "id" ChatId :> "events" :> QueryParam "offset" Word64 :> Get '[JSON] GetEventsResponse
+
+type AuthHeader = Header' '[Required, Strict] "Authorization" Text
 
 -- | Server implementation
-server :: ChatStore -> Server API
-server store = createChat store
-          :<|> joinChat store
-          :<|> postMessage store
-          :<|> getEvents store
+server :: AuthStore -> ChatStore -> Server API
+server authStore store = registerUser authStore
+                   :<|> exchangePasswordForToken authStore
+                   :<|> createChat authStore store
+                   :<|> joinChat authStore store
+                   :<|> postMessage authStore store
+                   :<|> getEvents authStore store
 
 -- | Create a new chat
-createChat :: ChatStore -> Handler CreateChatResponse
-createChat store = do
+createChat :: AuthStore -> ChatStore -> Text -> Handler CreateChatResponse
+createChat authStore store authorization = do
+  _ <- requireAuthenticatedUser authStore authorization
   -- Call ChatStore to create a new chat
   uuid <- liftIO $ ChatStore.createChat store
   return $ CreateChatResponse (ChatId uuid)
 
+registerUser :: AuthStore -> RegisterRequest -> Handler NoContent
+registerUser authStore RegisterRequest{..} = do
+  result <- liftIO $ Auth.registerUser authStore username password
+  case result of
+    Left "User already exists" ->
+      throwError err409 { errBody = "User already exists" }
+    Left err ->
+      throwError err400 { errBody = TLE.encodeUtf8 $ TL.pack err }
+    Right () -> pure NoContent
+
+exchangePasswordForToken :: AuthStore -> ExchangePasswordRequest -> Handler ExchangePasswordResponse
+exchangePasswordForToken authStore ExchangePasswordRequest{..} = do
+  result <- liftIO $ Auth.exchangePasswordForToken authStore exchangeUsername exchangePassword
+  case result of
+    Left _ -> throwError err401 { errBody = "Invalid username or password" }
+    Right tok -> pure $ ExchangePasswordResponse tok
+
 -- | Join a chat
-joinChat :: ChatStore -> ChatId -> JoinChatRequest -> Handler JoinChatResponse
-joinChat store (ChatId uuid) JoinChatRequest{..} = do
+joinChat :: AuthStore -> ChatStore -> Text -> ChatId -> JoinChatRequest -> Handler JoinChatResponse
+joinChat authStore store authorization (ChatId uuid) JoinChatRequest{..} = do
+  _ <- requireAuthenticatedUser authStore authorization
   -- Check if chat exists
   exists <- liftIO $ ChatStore.chatExists store uuid
   if not exists
@@ -154,8 +213,9 @@ joinChat store (ChatId uuid) JoinChatRequest{..} = do
         Right (pid, eventOffset) -> return $ JoinChatResponse pid eventOffset
 
 -- | Post a message to a chat
-postMessage :: ChatStore -> ChatId -> PostMessageRequest -> Handler PostMessageResponse
-postMessage store (ChatId uuid) PostMessageRequest{..} = do
+postMessage :: AuthStore -> ChatStore -> Text -> ChatId -> PostMessageRequest -> Handler PostMessageResponse
+postMessage authStore store authorization (ChatId uuid) PostMessageRequest{..} = do
+  _ <- requireAuthenticatedUser authStore authorization
   -- Check if chat exists
   exists <- liftIO $ ChatStore.chatExists store uuid
   if not exists
@@ -168,8 +228,9 @@ postMessage store (ChatId uuid) PostMessageRequest{..} = do
         Right eventOffset -> return $ PostMessageResponse eventOffset
 
 -- | Get events from a chat starting from an offset
-getEvents :: ChatStore -> ChatId -> Maybe Word64 -> Handler GetEventsResponse
-getEvents store (ChatId uuid) maybeOffset = do
+getEvents :: AuthStore -> ChatStore -> Text -> ChatId -> Maybe Word64 -> Handler GetEventsResponse
+getEvents authStore store authorization (ChatId uuid) maybeOffset = do
+  _ <- requireAuthenticatedUser authStore authorization
   let offset = maybe 0 id maybeOffset
   
   -- Check if chat exists
@@ -182,3 +243,13 @@ getEvents store (ChatId uuid) maybeOffset = do
       case result of
         Left err -> throwError err500 { errBody = TLE.encodeUtf8 $ TL.pack $ "Failed to get events: " ++ err }
         Right eventsData -> return $ GetEventsResponse eventsData
+
+requireAuthenticatedUser :: AuthStore -> Text -> Handler Text
+requireAuthenticatedUser authStore authorization =
+  case Text.stripPrefix "Bearer " authorization of
+    Nothing -> throwError err401 { errBody = "Authorization header must use Bearer token" }
+    Just tokenValue -> do
+      maybeUser <- liftIO $ Auth.authenticateToken authStore tokenValue
+      case maybeUser of
+        Nothing -> throwError err401 { errBody = "Invalid token" }
+        Just user -> pure user
