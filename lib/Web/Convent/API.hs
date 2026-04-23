@@ -184,10 +184,11 @@ registerUser :: AuthStore -> RegisterRequest -> Handler NoContent
 registerUser authStore RegisterRequest{..} = do
   result <- liftIO $ Auth.registerUser authStore username password
   case result of
-    Left "User already exists" ->
-      throwError err409 { errBody = "User already exists" }
-    Left err ->
-      throwError err400 { errBody = TLE.encodeUtf8 $ TL.pack err }
+    Left "Username cannot be empty" ->
+      throwError err400 { errBody = "Username cannot be empty" }
+    Left "Password must be at least 8 characters long" ->
+      throwError err400 { errBody = "Password must be at least 8 characters long" }
+    Left _ -> throwError err400 { errBody = "Invalid registration data" }
     Right () -> pure NoContent
 
 exchangePasswordForToken :: AuthStore -> ExchangePasswordRequest -> Handler ExchangePasswordResponse
@@ -247,7 +248,7 @@ getEvents authStore store authorization (ChatId uuid) maybeOffset = do
 requireAuthenticatedUser :: AuthStore -> Text -> Handler Text
 requireAuthenticatedUser authStore authorization =
   case Text.stripPrefix "Bearer " authorization of
-    Nothing -> throwError err401 { errBody = "Authorization header must use Bearer token" }
+    Nothing -> throwError err401 { errBody = "Authorization header must use Bearer scheme" }
     Just tokenValue -> do
       maybeUser <- liftIO $ Auth.authenticateToken authStore tokenValue
       case maybeUser of

@@ -79,7 +79,7 @@ cabal run convent-exe
 ```bash
 curl -X POST http://localhost:8080/users/register \
   -H "Content-Type: application/json" \
-  -d '{"username":"alice","password":"secret"}'
+  -d '{"username":"alice","password":"password123"}'
 ```
 
 2. Exchange password for token:
@@ -87,7 +87,7 @@ curl -X POST http://localhost:8080/users/register \
 ```bash
 curl -X POST http://localhost:8080/auth/token \
   -H "Content-Type: application/json" \
-  -d '{"username":"alice","password":"secret"}'
+  -d '{"username":"alice","password":"password123"}'
 ```
 
 3. Use token with chat endpoints:
