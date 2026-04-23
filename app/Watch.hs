@@ -88,11 +88,11 @@ printEvent event = do
   hFlush stdout
 
 normalizeBaseUrl :: String -> String
-normalizeBaseUrl url = do
+normalizeBaseUrl url =
   let reversed = reverse url
-  case reversed of
-    '/':rest -> reverse rest
-    _ -> url
+  in case reversed of
+       '/':rest -> reverse rest
+       _ -> url
 
 pollDelayMicros :: Int
 pollDelayMicros = 1000000
