@@ -68,6 +68,12 @@ All 42 tests should pass, covering:
 cabal run convent-exe
 ```
 
+Watch a chat and print new events as they arrive:
+
+```bash
+cabal run convent-watch -- http://localhost:8080 <chat-id> [start-offset]
+```
+
 ## Project Structure
 
 ```
