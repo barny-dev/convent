@@ -35,6 +35,7 @@ library
                     , Web.Convent.Events.ParticipantJoinedEvent
                     , Web.Convent.Events.ParticipantLeftEvent
                     , Web.Convent.Events.MessageSubmittedEvent
+                    , Web.Convent.Auth
                     , Web.Convent.API
     build-depends:    base >= 4.18 && < 5
                     , bytestring >= 0.11
@@ -47,6 +48,8 @@ library
                     , aeson >= 2.1
                     , time >= 1.12
                     , directory >= 1.3
+                    , cryptonite >= 0.30
+                    , memory >= 0.18
     default-language: GHC2021
 
 executable convent-exe
@@ -75,6 +78,7 @@ test-suite convent-test
                     , Web.Convent.Events.MessageSubmittedEventSpec
                     , Web.Convent.Events.ChatFlowSpec
                     , Web.Convent.APISpec
+                    , Web.Convent.AuthSpec
     hs-source-dirs:   test
     build-depends:    convent
                     , base >= 4.18 && < 5
