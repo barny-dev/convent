@@ -15,6 +15,7 @@ module Web.Convent.API
   , PostMessageResponse(..)
   , GetEventsResponse(..)
   , EventResponse(..)
+  , waitForEvents
   ) where
 
 import Control.Concurrent (threadDelay)
