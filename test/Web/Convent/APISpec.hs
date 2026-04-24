@@ -16,6 +16,9 @@ import Web.Convent.Storage.ChatStore (newChatStore, ChatStoreConfig(..))
 import qualified Web.Convent.Storage.ChatStore as ChatStore
 import Web.Convent.API (waitForEvents)
 
+streamTestPostDelayMicros :: Int
+streamTestPostDelayMicros = 200000
+
 spec :: Spec
 spec = describe "API" $ do
   describe "Chat creation and operations" $ do
@@ -137,7 +140,7 @@ spec = describe "API" $ do
         done <- newEmptyMVar
         _ <- forkIO $
           (do
-            threadDelay 200000
+            threadDelay streamTestPostDelayMicros
             void (ChatStore.postChatMessage store uuid participantId "hello from stream"))
           `finally` putMVar done ()
 
