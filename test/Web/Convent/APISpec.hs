@@ -5,6 +5,7 @@ import Test.Hspec
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Monad (void)
+import Control.Exception (finally)
 import qualified Data.Text as Text
 import System.Directory (doesDirectoryExist, doesFileExist)
 import System.IO.Temp (withSystemTempDirectory)
@@ -134,10 +135,11 @@ spec = describe "API" $ do
           Right (pid, _) -> return pid
 
         done <- newEmptyMVar
-        _ <- forkIO $ do
-          threadDelay 200000
-          void (ChatStore.postChatMessage store uuid participantId "hello from stream")
-          putMVar done ()
+        _ <- forkIO $
+          (do
+            threadDelay 200000
+            void (ChatStore.postChatMessage store uuid participantId "hello from stream"))
+          `finally` putMVar done ()
 
         result <- waitForEvents store uuid 1 3000
         case result of

@@ -210,7 +210,8 @@ waitForEvents store uuid startOffset timeoutMs = do
   startTime <- getPOSIXTime
   go startTime
   where
-    timeoutMicros = timeoutMs * 1000
+    timeoutMicros :: Integer
+    timeoutMicros = fromIntegral timeoutMs * 1000
     go startTime = do
       result <- ChatStore.getChatEvents store uuid startOffset
       case result of
@@ -218,7 +219,8 @@ waitForEvents store uuid startOffset timeoutMs = do
         Right [] ->
           do
             now <- getPOSIXTime
-            let elapsedMicros = round ((now - startTime) * 1000000)
+            let elapsedMicros :: Integer
+                elapsedMicros = round ((now - startTime) * 1000000)
             if elapsedMicros >= timeoutMicros
               then return (Right [])
               else do
