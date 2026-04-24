@@ -3,6 +3,7 @@ module Web.Convent.APISpec (spec) where
 
 import Test.Hspec
 import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
 import Control.Monad (void)
 import qualified Data.Text as Text
 import System.Directory (doesDirectoryExist, doesFileExist)
@@ -132,12 +133,17 @@ spec = describe "API" $ do
           Left err -> expectationFailure ("Join failed: " ++ err) >> return 0
           Right (pid, _) -> return pid
 
-        _ <- forkIO $ threadDelay 200000 >> void (ChatStore.postChatMessage store uuid participantId "hello from stream")
+        done <- newEmptyMVar
+        _ <- forkIO $ do
+          threadDelay 200000
+          void (ChatStore.postChatMessage store uuid participantId "hello from stream")
+          putMVar done ()
 
         result <- waitForEvents store uuid 1 3000
         case result of
           Left err -> expectationFailure $ "waitForEvents failed: " ++ err
           Right evts -> length evts `shouldBe` 1
+        takeMVar done
 
     it "should return empty event list when stream helper times out" $ do
       withSystemTempDirectory "convent-test" $ \tmpDir -> do
