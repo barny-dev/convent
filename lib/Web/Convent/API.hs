@@ -205,7 +205,7 @@ streamEvents store (ChatId uuid) maybeOffset maybeTimeoutMs = do
 waitForEvents :: ChatStore -> UUID -> Word64 -> Int -> IO (Either String [EventResponse])
 waitForEvents store uuid startOffset timeoutMs = go 0
   where
-    timeoutMicros = max 0 timeoutMs * 1000
+    timeoutMicros = (max 0 timeoutMs) * 1000
     go elapsed = do
       result <- ChatStore.getChatEvents store uuid startOffset
       case result of

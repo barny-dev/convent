@@ -131,10 +131,7 @@ spec = describe "API" $ do
           Left err -> expectationFailure ("Join failed: " ++ err) >> return 0
           Right (pid, _) -> return pid
 
-        _ <- forkIO $ do
-          threadDelay 200000
-          _ <- ChatStore.postChatMessage store uuid participantId "hello from stream"
-          return ()
+        _ <- forkIO $ threadDelay 200000 >> ChatStore.postChatMessage store uuid participantId "hello from stream" >> pure ()
 
         result <- waitForEvents store uuid 1 3000
         case result of
