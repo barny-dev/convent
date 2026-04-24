@@ -17,6 +17,7 @@ module Web.Convent.API
   , EventResponse(..)
   ) where
 
+import Control.Concurrent (threadDelay)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), withObject, (.:))
 import Data.Text (Text)
@@ -124,6 +125,7 @@ type API =
   :<|> "chats" :> Capture "id" ChatId :> "join" :> ReqBody '[JSON] JoinChatRequest :> Post '[JSON] JoinChatResponse
   :<|> "chats" :> Capture "id" ChatId :> "messages" :> ReqBody '[JSON] PostMessageRequest :> Post '[JSON] PostMessageResponse
   :<|> "chats" :> Capture "id" ChatId :> "events" :> QueryParam "offset" Word64 :> Get '[JSON] GetEventsResponse
+  :<|> "chats" :> Capture "id" ChatId :> "events" :> "stream" :> QueryParam "offset" Word64 :> QueryParam "timeoutMs" Int :> Get '[JSON] GetEventsResponse
 
 -- | Server implementation
 server :: ChatStore -> Server API
@@ -131,6 +133,7 @@ server store = createChat store
           :<|> joinChat store
           :<|> postMessage store
           :<|> getEvents store
+          :<|> streamEvents store
 
 -- | Create a new chat
 createChat :: ChatStore -> Handler CreateChatResponse
@@ -182,3 +185,40 @@ getEvents store (ChatId uuid) maybeOffset = do
       case result of
         Left err -> throwError err500 { errBody = TLE.encodeUtf8 $ TL.pack $ "Failed to get events: " ++ err }
         Right eventsData -> return $ GetEventsResponse eventsData
+
+-- | Wait for new events from an offset and return as soon as available (or timeout)
+streamEvents :: ChatStore -> ChatId -> Maybe Word64 -> Maybe Int -> Handler GetEventsResponse
+streamEvents store (ChatId uuid) maybeOffset maybeTimeoutMs = do
+  let offset = maybe 0 id maybeOffset
+      timeoutMs = maybe defaultStreamTimeoutMs id maybeTimeoutMs
+
+  exists <- liftIO $ ChatStore.chatExists store uuid
+  if not exists
+    then throwError err404 { errBody = "Chat not found" }
+    else do
+      result <- liftIO $ waitForEvents store uuid offset timeoutMs
+      case result of
+        Left err -> throwError err500 { errBody = TLE.encodeUtf8 $ TL.pack $ "Failed to stream events: " ++ err }
+        Right eventsData -> return $ GetEventsResponse eventsData
+
+waitForEvents :: ChatStore -> UUID -> Word64 -> Int -> IO (Either String [EventResponse])
+waitForEvents store uuid startOffset timeoutMs = go 0
+  where
+    timeoutMicros = max 0 timeoutMs * 1000
+    go elapsed = do
+      result <- ChatStore.getChatEvents store uuid startOffset
+      case result of
+        Left err -> return (Left err)
+        Right [] ->
+          if elapsed >= timeoutMicros
+            then return (Right [])
+            else do
+              threadDelay streamPollDelayMicros
+              go (elapsed + streamPollDelayMicros)
+        Right eventsData -> return (Right eventsData)
+
+streamPollDelayMicros :: Int
+streamPollDelayMicros = 200000
+
+defaultStreamTimeoutMs :: Int
+defaultStreamTimeoutMs = 30000

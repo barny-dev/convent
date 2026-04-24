@@ -65,23 +65,22 @@ watchLoop :: String -> String -> Integer -> IO ()
 watchLoop baseUrl chatId startOffset = loop startOffset
   where
     loop currentOffset = do
-      result <- fetchEvents baseUrl chatId currentOffset
+      result <- fetchEvents baseUrl chatId currentOffset streamRequestTimeoutMs
       case result of
         Left err -> do
           hPutStrLn stderr err
-          threadDelay pollDelayMicros
+          threadDelay errorRetryDelayMicros
           loop currentOffset
         Right newEvents -> do
           mapM_ printEvent newEvents
           let nextOffset = case reverse newEvents of
                 [] -> currentOffset
                 lastEvent : _ -> eventOffset lastEvent + 1
-          threadDelay pollDelayMicros
           loop nextOffset
 
-fetchEvents :: String -> String -> Integer -> IO (Either String [EventItem])
-fetchEvents baseUrl chatId offset = do
-  request <- parseRequest (baseUrl ++ "/chats/" ++ chatId ++ "/events?offset=" ++ show offset)
+fetchEvents :: String -> String -> Integer -> Int -> IO (Either String [EventItem])
+fetchEvents baseUrl chatId offset timeoutMs = do
+  request <- parseRequest (baseUrl ++ "/chats/" ++ chatId ++ "/events/stream?offset=" ++ show offset ++ "&timeoutMs=" ++ show timeoutMs)
   response <- httpLBS request
   let code = getResponseStatusCode response
   if code /= 200
@@ -108,5 +107,8 @@ parseChatId raw =
     Nothing -> Left "chatId must be a valid UUID."
     Just uuid -> Right (UUID.toString uuid)
 
-pollDelayMicros :: Int
-pollDelayMicros = 1000000
+streamRequestTimeoutMs :: Int
+streamRequestTimeoutMs = 30000
+
+errorRetryDelayMicros :: Int
+errorRetryDelayMicros = 1000000
