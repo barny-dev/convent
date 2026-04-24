@@ -21,6 +21,7 @@ module Web.Convent.API
 import Control.Concurrent (threadDelay)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), withObject, (.:))
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Lazy as TL
@@ -191,7 +192,7 @@ getEvents store (ChatId uuid) maybeOffset = do
 -- | Wait for new events from an offset and return as soon as available (or timeout)
 streamEvents :: ChatStore -> ChatId -> Maybe Word64 -> Maybe Int -> Handler GetEventsResponse
 streamEvents store (ChatId uuid) maybeOffset maybeTimeoutMs = do
-  let offset = maybe 0 id maybeOffset
+  let offset = fromMaybe 0 maybeOffset
       timeoutMs = case maybeTimeoutMs of
         Just ms | ms > 0 -> ms
         _ -> defaultStreamTimeoutMs
