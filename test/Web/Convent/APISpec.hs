@@ -3,6 +3,7 @@ module Web.Convent.APISpec (spec) where
 
 import Test.Hspec
 import Control.Concurrent (forkIO, threadDelay)
+import Control.Monad (void)
 import qualified Data.Text as Text
 import System.Directory (doesDirectoryExist, doesFileExist)
 import System.IO.Temp (withSystemTempDirectory)
@@ -131,7 +132,7 @@ spec = describe "API" $ do
           Left err -> expectationFailure ("Join failed: " ++ err) >> return 0
           Right (pid, _) -> return pid
 
-        _ <- forkIO $ threadDelay 200000 >> ChatStore.postChatMessage store uuid participantId "hello from stream" >> pure ()
+        _ <- forkIO $ threadDelay 200000 >> void (ChatStore.postChatMessage store uuid participantId "hello from stream")
 
         result <- waitForEvents store uuid 1 3000
         case result of
