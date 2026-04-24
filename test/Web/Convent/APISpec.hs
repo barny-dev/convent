@@ -2,6 +2,10 @@
 module Web.Convent.APISpec (spec) where
 
 import Test.Hspec
+import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.MVar (newEmptyMVar, putMVar, takeMVar)
+import Control.Monad (void)
+import Control.Exception (finally)
 import qualified Data.Text as Text
 import System.Directory (doesDirectoryExist, doesFileExist)
 import System.IO.Temp (withSystemTempDirectory)
@@ -10,6 +14,10 @@ import Data.Maybe (fromJust)
 
 import Web.Convent.Storage.ChatStore (newChatStore, ChatStoreConfig(..))
 import qualified Web.Convent.Storage.ChatStore as ChatStore
+import Web.Convent.API (waitForEvents)
+
+streamTestPostDelayMicros :: Int
+streamTestPostDelayMicros = 200000
 
 spec :: Spec
 spec = describe "API" $ do
@@ -117,3 +125,40 @@ spec = describe "API" $ do
         let fakeUuid = fromJust $ UUID.fromString "00000000-0000-0000-0000-000000000000"
         notExists <- ChatStore.chatExists store fakeUuid
         notExists `shouldBe` False
+
+    it "should wait for new events via stream helper and return when available" $ do
+      withSystemTempDirectory "convent-test" $ \tmpDir -> do
+        let config = ChatStoreConfig { ChatStore.chatsDirectory = tmpDir ++ "/chats" }
+        store <- newChatStore config
+        uuid <- ChatStore.createChat store
+
+        joinResult <- ChatStore.joinChatParticipant store uuid "Alice"
+        participantId <- case joinResult of
+          Left err -> expectationFailure ("Join failed: " ++ err) >> return 0
+          Right (pid, _) -> return pid
+
+        done <- newEmptyMVar
+        _ <- forkIO $
+          (do
+            threadDelay streamTestPostDelayMicros
+            void (ChatStore.postChatMessage store uuid participantId "hello from stream"))
+          `finally` putMVar done ()
+
+        result <- waitForEvents store uuid 1 3000
+        case result of
+          Left err -> expectationFailure $ "waitForEvents failed: " ++ err
+          Right evts -> length evts `shouldBe` 1
+        takeMVar done
+
+    it "should return empty event list when stream helper times out" $ do
+      withSystemTempDirectory "convent-test" $ \tmpDir -> do
+        let config = ChatStoreConfig { ChatStore.chatsDirectory = tmpDir ++ "/chats" }
+        store <- newChatStore config
+        uuid <- ChatStore.createChat store
+
+        _ <- ChatStore.joinChatParticipant store uuid "Alice"
+
+        result <- waitForEvents store uuid 1 50
+        case result of
+          Left err -> expectationFailure $ "waitForEvents failed: " ++ err
+          Right evts -> evts `shouldBe` []
