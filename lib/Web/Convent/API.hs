@@ -229,7 +229,9 @@ waitForEvents store uuid startOffset timeoutMs = do
         Right eventsData -> return (Right eventsData)
 
 streamPollDelayMicros :: Int
+-- Poll every 200ms (microseconds) while waiting for new events.
 streamPollDelayMicros = 200000
 
 defaultStreamTimeoutMs :: Int
+-- Default long-poll timeout: 30 seconds (milliseconds).
 defaultStreamTimeoutMs = 30000
