@@ -192,7 +192,9 @@ getEvents store (ChatId uuid) maybeOffset = do
 streamEvents :: ChatStore -> ChatId -> Maybe Word64 -> Maybe Int -> Handler GetEventsResponse
 streamEvents store (ChatId uuid) maybeOffset maybeTimeoutMs = do
   let offset = maybe 0 id maybeOffset
-      timeoutMs = maybe defaultStreamTimeoutMs id maybeTimeoutMs
+      timeoutMs = case maybeTimeoutMs of
+        Just ms | ms > 0 -> ms
+        _ -> defaultStreamTimeoutMs
 
   exists <- liftIO $ ChatStore.chatExists store uuid
   if not exists
@@ -208,11 +210,7 @@ waitForEvents store uuid startOffset timeoutMs = do
   startTime <- getPOSIXTime
   go startTime
   where
-    normalizedTimeoutMs =
-      if timeoutMs <= 0
-        then defaultStreamTimeoutMs
-        else timeoutMs
-    timeoutMicros = normalizedTimeoutMs * 1000
+    timeoutMicros = timeoutMs * 1000
     go startTime = do
       result <- ChatStore.getChatEvents store uuid startOffset
       case result of
