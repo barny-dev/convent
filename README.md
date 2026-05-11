@@ -25,13 +25,17 @@ This project is in active development. The core storage layer is implemented and
   - `ParticipantLeftEvent` (0x02) - Records when a participant leaves  
   - `MessageSubmittedEvent` (0x03) - Records chat messages
 
+- **Simple User/Auth**
+  - User registration with username/password
+  - Password exchange endpoint returning bearer token
+  - Token-protected chat endpoints
+
 - **File I/O Operations**
   - Page-level read/write operations
   - Error handling and validation
 
 ### Planned Features
 
-- HTTP API for chat interactions
 - Chat management system
 - Directory structure for chat storage
 - Client interface
@@ -66,6 +70,31 @@ All 42 tests should pass, covering:
 
 ```bash
 cabal run convent-exe
+```
+
+### Authentication flow
+
+1. Register a user:
+
+```bash
+curl -X POST http://localhost:8080/users/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"password123"}'
+```
+
+2. Exchange password for token:
+
+```bash
+curl -X POST http://localhost:8080/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"password123"}'
+```
+
+3. Use token with chat endpoints:
+
+```bash
+curl -X POST http://localhost:8080/chats \
+  -H "Authorization: Bearer <token>"
 ```
 
 ## Project Structure
