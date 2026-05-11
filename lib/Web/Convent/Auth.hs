@@ -3,12 +3,15 @@
 module Web.Convent.Auth
   ( AuthStore
   , newAuthStore
+  , startTokenCleanupJob
   , registerUser
   , exchangePasswordForToken
   , authenticateToken
   ) where
 
-import Data.IORef (IORef, newIORef, atomicModifyIORef')
+import Control.Concurrent (ThreadId, forkIO, threadDelay)
+import Control.Monad (forever)
+import Data.IORef (IORef, newIORef, readIORef, atomicModifyIORef')
 import Data.ByteString (ByteString)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -34,6 +37,9 @@ data AuthStore = AuthStore
 tokenExpirationSeconds :: NominalDiffTime
 tokenExpirationSeconds = 3600 -- one hour
 
+tokenCleanupIntervalSeconds :: Int
+tokenCleanupIntervalSeconds = 60
+
 passwordHashParameters :: Parameters
 passwordHashParameters = Parameters
   { iterCounts = 100000
@@ -45,6 +51,11 @@ newAuthStore = do
   users <- newIORef Map.empty
   tokens <- newIORef Map.empty
   pure AuthStore{users, tokens}
+
+startTokenCleanupJob :: AuthStore -> IO ThreadId
+startTokenCleanupJob authStore = forkIO $ forever $ do
+  cleanupExpiredTokens authStore
+  threadDelay (tokenCleanupIntervalSeconds * 1000000)
 
 registerUser :: AuthStore -> Text -> Text -> IO (Either String ())
 registerUser AuthStore{users} username password
@@ -81,9 +92,18 @@ exchangePasswordForToken AuthStore{users, tokens} username password = do
 authenticateToken :: AuthStore -> Text -> IO (Maybe Text)
 authenticateToken AuthStore{tokens} token = do
   now <- getCurrentTime
+  current <- readIORef tokens
+  pure $
+    case Map.lookup token current of
+      Just (username, expiry)
+        | expiry > now -> Just username
+      _ -> Nothing
+
+cleanupExpiredTokens :: AuthStore -> IO ()
+cleanupExpiredTokens AuthStore{tokens} = do
+  now <- getCurrentTime
   atomicModifyIORef' tokens $ \current ->
-    let activeTokens = Map.filter (\(_, expiry) -> expiry > now) current
-    in (activeTokens, fmap fst (Map.lookup token activeTokens))
+    (Map.filter (\(_, expiry) -> expiry > now) current, ())
 
 hashPassword :: Text -> Text -> Text
 hashPassword salt password =

@@ -3,7 +3,7 @@ module Main where
 import Network.Wai.Handler.Warp (run)
 import Servant
 import Web.Convent.API (API, server)
-import Web.Convent.Auth (newAuthStore)
+import Web.Convent.Auth (newAuthStore, startTokenCleanupJob)
 import Web.Convent.Storage.ChatStore (newChatStore, loadExistingChats, ChatStoreConfig(..))
 
 main :: IO ()
@@ -13,7 +13,8 @@ main = do
   let config = ChatStoreConfig { chatsDirectory = "chats" }
   store <- newChatStore config
   authStore <- newAuthStore
-  
+  _ <- startTokenCleanupJob authStore
+   
   -- Load existing chats from disk into memory
   result <- loadExistingChats store
   case result of
