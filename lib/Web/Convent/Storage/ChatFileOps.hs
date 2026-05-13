@@ -41,10 +41,10 @@ createChatFiles chatDir = do
         , PosixIO.creat = Just PosixFiles.ownerModes
         }
   bracket (PosixIO.openFd indexPath PosixIO.WriteOnly createFlags) PosixIO.closeFd $ \indexFd -> do
-    either (\err -> error ("Failed to initialize chat index file " ++ indexPath ++ ": " ++ show err)) (const $ return ()) =<<
+    either (\err -> ioError (userError ("Failed to initialize chat index file " ++ indexPath ++ ": " ++ show err))) (const $ return ()) =<<
       FilePage.write indexFd (FilePage.Index 0, FilePage.Size 8192) (IndexPage.toByteString IndexPage.emptyPage)
   bracket (PosixIO.openFd eventsPath PosixIO.WriteOnly createFlags) PosixIO.closeFd $ \eventsFd -> do
-    either (\err -> error ("Failed to initialize chat events file " ++ eventsPath ++ ": " ++ show err)) (const $ return ()) =<<
+    either (\err -> ioError (userError ("Failed to initialize chat events file " ++ eventsPath ++ ": " ++ show err))) (const $ return ()) =<<
       FilePage.write eventsFd (FilePage.Index 0, FilePage.Size 8192) (EventsPage.toByteString EventsPage.emptyPage)
 
 -- | Initialize ChatData from file descriptors

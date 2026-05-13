@@ -67,7 +67,11 @@ read fd (Index ix, Size ps) = (wrapIOError (\err -> ReadIOError err) read') >>= 
                    else return ()
                  lift $ PosixIO.fdSeek fd IO.AbsoluteSeek offset
                  pageData <- lift $ readExact fd (fromIntegral ps)
-                 return $! pageData
+                 if ByteString.length pageData < ps
+                   then throwE $ ReadFileTooSmall
+                          (fromIntegral requiredSize)
+                          (fromIntegral (offset + fromIntegral (ByteString.length pageData)))
+                   else return $! pageData
 
 -- | Errors that can occur during page write operations.
 data WriteError = 
