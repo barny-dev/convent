@@ -15,10 +15,13 @@ module Web.Convent.API
   , PostMessageResponse(..)
   , GetEventsResponse(..)
   , EventResponse(..)
+  , waitForEvents
   ) where
 
+import Control.Concurrent (threadDelay)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), withObject, (.:))
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Lazy as TL
@@ -26,6 +29,7 @@ import qualified Data.Text.Lazy.Encoding as TLE
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import Data.Word (Word64)
+import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Generics (Generic)
 import Servant
 
@@ -124,6 +128,7 @@ type API =
   :<|> "chats" :> Capture "id" ChatId :> "join" :> ReqBody '[JSON] JoinChatRequest :> Post '[JSON] JoinChatResponse
   :<|> "chats" :> Capture "id" ChatId :> "messages" :> ReqBody '[JSON] PostMessageRequest :> Post '[JSON] PostMessageResponse
   :<|> "chats" :> Capture "id" ChatId :> "events" :> QueryParam "offset" Word64 :> Get '[JSON] GetEventsResponse
+  :<|> "chats" :> Capture "id" ChatId :> "events" :> "stream" :> QueryParam "offset" Word64 :> QueryParam "timeoutMs" Int :> Get '[JSON] GetEventsResponse
 
 -- | Server implementation
 server :: ChatStore -> Server API
@@ -131,6 +136,7 @@ server store = createChat store
           :<|> joinChat store
           :<|> postMessage store
           :<|> getEvents store
+          :<|> streamEvents store
 
 -- | Create a new chat
 createChat :: ChatStore -> Handler CreateChatResponse
@@ -182,3 +188,54 @@ getEvents store (ChatId uuid) maybeOffset = do
       case result of
         Left err -> throwError err500 { errBody = TLE.encodeUtf8 $ TL.pack $ "Failed to get events: " ++ err }
         Right eventsData -> return $ GetEventsResponse eventsData
+
+-- | Wait for new events from an offset and return as soon as available (or timeout)
+streamEvents :: ChatStore -> ChatId -> Maybe Word64 -> Maybe Int -> Handler GetEventsResponse
+streamEvents store (ChatId uuid) maybeOffset maybeTimeoutMs = do
+  let offset = fromMaybe 0 maybeOffset
+      timeoutMs = case maybeTimeoutMs of
+        Just ms | ms > 0 -> ms
+        _ -> defaultStreamTimeoutMs
+
+  exists <- liftIO $ ChatStore.chatExists store uuid
+  if not exists
+    then throwError err404 { errBody = "Chat not found" }
+    else do
+      result <- liftIO $ waitForEvents store uuid offset timeoutMs
+      case result of
+        Left err -> throwError err500 { errBody = TLE.encodeUtf8 $ TL.pack $ "Failed to stream events: " ++ err }
+        Right eventsData -> return $ GetEventsResponse eventsData
+
+waitForEvents :: ChatStore -> UUID -> Word64 -> Int -> IO (Either String [EventResponse])
+waitForEvents store uuid startOffset timeoutMs = do
+  startTimeNs <- getMonotonicTimeNSec
+  go startTimeNs
+  where
+    timeoutNs :: Integer
+    timeoutNs = fromIntegral timeoutMs * 1000000
+    go startTimeNs = do
+      result <- ChatStore.getChatEvents store uuid startOffset
+      case result of
+        Left err -> return (Left err)
+        Right [] ->
+          do
+            nowNs <- getMonotonicTimeNSec
+            let elapsedNs :: Integer
+                elapsedNs = fromIntegral (nowNs - startTimeNs)
+                remainingNs :: Integer
+                remainingNs = timeoutNs - elapsedNs
+            if remainingNs <= 0
+              then return (Right [])
+              else do
+                let remainingMicros = max 1 (fromIntegral (remainingNs `div` 1000))
+                threadDelay (min streamPollDelayMicros remainingMicros)
+                go startTimeNs
+        Right eventsData -> return (Right eventsData)
+
+streamPollDelayMicros :: Int
+-- Poll every 200ms while waiting for new events (200,000 microseconds).
+streamPollDelayMicros = 200000
+
+defaultStreamTimeoutMs :: Int
+-- Default long-poll timeout: 30 seconds (30,000 milliseconds).
+defaultStreamTimeoutMs = 30000
