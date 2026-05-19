@@ -26,10 +26,10 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Lazy.Encoding as TLE
-import Data.Time.Clock.POSIX (getPOSIXTime)
 import Data.UUID (UUID)
 import qualified Data.UUID as UUID
 import Data.Word (Word64)
+import GHC.Clock (getMonotonicTimeNSec)
 import GHC.Generics (Generic)
 import Servant
 
@@ -208,27 +208,27 @@ streamEvents store (ChatId uuid) maybeOffset maybeTimeoutMs = do
 
 waitForEvents :: ChatStore -> UUID -> Word64 -> Int -> IO (Either String [EventResponse])
 waitForEvents store uuid startOffset timeoutMs = do
-  startTime <- getPOSIXTime
-  go startTime
+  startTimeNs <- getMonotonicTimeNSec
+  go startTimeNs
   where
     timeoutMicros :: Integer
     timeoutMicros = fromIntegral timeoutMs * 1000
-    go startTime = do
+    go startTimeNs = do
       result <- ChatStore.getChatEvents store uuid startOffset
       case result of
         Left err -> return (Left err)
         Right [] ->
           do
-            now <- getPOSIXTime
+            nowNs <- getMonotonicTimeNSec
             let elapsedMicros :: Integer
-                elapsedMicros = round ((now - startTime) * 1000000)
+                elapsedMicros = fromIntegral (nowNs - startTimeNs) `div` 1000
                 remainingMicros :: Integer
                 remainingMicros = timeoutMicros - elapsedMicros
             if remainingMicros <= 0
               then return (Right [])
               else do
                 threadDelay (min streamPollDelayMicros (fromIntegral remainingMicros))
-                go startTime
+                go startTimeNs
         Right eventsData -> return (Right eventsData)
 
 streamPollDelayMicros :: Int
