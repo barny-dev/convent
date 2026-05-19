@@ -4,6 +4,7 @@
 module Main where
 
 import Control.Concurrent (threadDelay)
+import Control.Exception (SomeException, displayException, try)
 import Data.Aeson (FromJSON(..), ToJSON(..), eitherDecode, withObject, (.:), (.=), object, encode)
 import qualified Data.ByteString.Lazy.Char8 as BL8
 import Data.Text (Text)
@@ -80,14 +81,18 @@ watchLoop baseUrl chatId startOffset = loop startOffset
 
 fetchEvents :: String -> String -> Integer -> Int -> IO (Either String [EventItem])
 fetchEvents baseUrl chatId offset timeoutMs = do
-  request <- parseRequest (baseUrl ++ "/chats/" ++ chatId ++ "/events/stream?offset=" ++ show offset ++ "&timeoutMs=" ++ show timeoutMs)
-  response <- httpLBS request
-  let code = getResponseStatusCode response
-  if code /= 200
-    then return $ Left ("HTTP error " ++ show code ++ " while fetching events")
-    else case eitherDecode (getResponseBody response) of
-      Left parseErr -> return $ Left ("Failed to decode response JSON: " ++ parseErr)
-      Right parsed -> return $ Right (events (parsed :: EventsResponse))
+  result <- try $ do
+    request <- parseRequest (baseUrl ++ "/chats/" ++ chatId ++ "/events/stream?offset=" ++ show offset ++ "&timeoutMs=" ++ show timeoutMs)
+    response <- httpLBS request
+    let code = getResponseStatusCode response
+    if code /= 200
+      then return $ Left ("HTTP error " ++ show code ++ " while fetching events")
+      else case eitherDecode (getResponseBody response) of
+        Left parseErr -> return $ Left ("Failed to decode response JSON: " ++ parseErr)
+        Right parsed -> return $ Right (events (parsed :: EventsResponse))
+  case result of
+    Left ex -> return $ Left ("Request failed while fetching events: " ++ displayException (ex :: SomeException))
+    Right response -> return response
 
 printEvent :: EventItem -> IO ()
 printEvent event = do
