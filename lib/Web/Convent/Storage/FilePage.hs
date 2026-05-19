@@ -65,7 +65,7 @@ read fd (Index ix, Size ps) = (wrapIOError (\err -> ReadIOError err) read') >>= 
                  if fileSize < requiredSize
                    then throwE $ ReadFileTooSmall (fromIntegral requiredSize) (fromIntegral fileSize)
                    else return ()
-                 lift $ PosixIO.fdSeek fd IO.AbsoluteSeek offset
+                 lift $ PosixIO.fdSeek fd PosixIO.AbsoluteSeek offset
                  pageData <- lift $ readExact fd (fromIntegral ps)
                  if ByteString.length pageData < ps
                    then throwE $ ReadFileTooSmall
