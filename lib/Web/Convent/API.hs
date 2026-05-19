@@ -211,8 +211,8 @@ waitForEvents store uuid startOffset timeoutMs = do
   startTimeNs <- getMonotonicTimeNSec
   go startTimeNs
   where
-    timeoutMicros :: Integer
-    timeoutMicros = fromIntegral timeoutMs * 1000
+    timeoutNs :: Integer
+    timeoutNs = fromIntegral timeoutMs * 1000000
     go startTimeNs = do
       result <- ChatStore.getChatEvents store uuid startOffset
       case result of
@@ -220,14 +220,15 @@ waitForEvents store uuid startOffset timeoutMs = do
         Right [] ->
           do
             nowNs <- getMonotonicTimeNSec
-            let elapsedMicros :: Integer
-                elapsedMicros = fromIntegral (nowNs - startTimeNs) `div` 1000
-                remainingMicros :: Integer
-                remainingMicros = timeoutMicros - elapsedMicros
-            if remainingMicros <= 0
+            let elapsedNs :: Integer
+                elapsedNs = fromIntegral (nowNs - startTimeNs)
+                remainingNs :: Integer
+                remainingNs = timeoutNs - elapsedNs
+            if remainingNs <= 0
               then return (Right [])
               else do
-                threadDelay (min streamPollDelayMicros (fromIntegral remainingMicros))
+                let remainingMicros = max 1 (fromIntegral (remainingNs `div` 1000))
+                threadDelay (min streamPollDelayMicros remainingMicros)
                 go startTimeNs
         Right eventsData -> return (Right eventsData)
 
