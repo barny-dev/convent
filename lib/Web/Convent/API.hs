@@ -222,10 +222,12 @@ waitForEvents store uuid startOffset timeoutMs = do
             now <- getPOSIXTime
             let elapsedMicros :: Integer
                 elapsedMicros = round ((now - startTime) * 1000000)
-            if elapsedMicros >= timeoutMicros
+                remainingMicros :: Integer
+                remainingMicros = timeoutMicros - elapsedMicros
+            if remainingMicros <= 0
               then return (Right [])
               else do
-                threadDelay streamPollDelayMicros
+                threadDelay (min streamPollDelayMicros (fromIntegral remainingMicros))
                 go startTime
         Right eventsData -> return (Right eventsData)
 
