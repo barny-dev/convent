@@ -21,9 +21,9 @@ import Data.Text (Text)
 import qualified Data.Text as Text
 import Data.Aeson (ToJSON, FromJSON)
 import GHC.Generics (Generic)
-import System.IO (Handle)
 import qualified Data.ByteString as BS
 import Data.Time.Clock.POSIX (getPOSIXTime)
+import System.Posix.Types (Fd)
 import Web.Convent.Storage.IndexPage (IndexPage)
 import qualified Web.Convent.Storage.IndexPage as IndexPage
 import Web.Convent.Storage.EventsPage (EventsPage)
@@ -32,8 +32,8 @@ import qualified Web.Convent.Storage.FilePage as FilePage
 
 -- | Represents data associated with a single chat
 data ChatData = ChatData
-  { chatDataIndexHandle :: Handle            -- ^ Handle to the index file
-  , chatDataEventsHandle :: Handle          -- ^ Handle to the events file
+  { chatDataIndexFd :: Fd                   -- ^ File descriptor for the index file
+  , chatDataEventsFd :: Fd                  -- ^ File descriptor for the events file
   , chatDataCachedIndexPages :: Map.Map Int IndexPage  -- ^ Currently loaded index pages
   , chatDataCachedEventPages :: Map.Map Int EventsPage -- ^ Currently loaded event pages
   , chatDataIndexPageCount :: Int            -- ^ Number of index pages
@@ -65,7 +65,7 @@ loadIndexPage pageIdx = do
     Just page -> return page  -- Cache hit
     Nothing -> do
       -- Cache miss - load from file
-      eitherPage <- lift $ lift $ FilePage.load (chatDataIndexHandle chatData) (FilePage.Index pageIdx, FilePage.Size 8192)
+      eitherPage <- lift $ lift $ FilePage.load (chatDataIndexFd chatData) (FilePage.Index pageIdx, FilePage.Size 8192)
       case eitherPage of
         Left _ -> throwE "Failed to load index page"
         Right page -> do
@@ -82,7 +82,7 @@ loadEventsPage pageIdx = do
     Just page -> return page  -- Cache hit
     Nothing -> do
       -- Cache miss - load from file
-      eitherPage <- lift $ lift $ FilePage.load (chatDataEventsHandle chatData) (FilePage.Index pageIdx, FilePage.Size 8192)
+      eitherPage <- lift $ lift $ FilePage.load (chatDataEventsFd chatData) (FilePage.Index pageIdx, FilePage.Size 8192)
       case eitherPage of
         Left _ -> throwE "Failed to load events page"
         Right page -> do
@@ -96,7 +96,7 @@ saveIndexPage :: Int -> IndexPage -> ChatDataState ()
 saveIndexPage pageIdx page = do
   chatData <- lift get
   -- Write to file
-  eitherUnit <- lift $ lift $ FilePage.save (chatDataIndexHandle chatData) (FilePage.Index pageIdx, FilePage.Size 8192) page
+  eitherUnit <- lift $ lift $ FilePage.save (chatDataIndexFd chatData) (FilePage.Index pageIdx, FilePage.Size 8192) page
   case eitherUnit of
     Left _ -> throwE "Failed to save index page"
     Right () -> do
@@ -109,7 +109,7 @@ saveEventsPage :: Int -> EventsPage -> ChatDataState ()
 saveEventsPage pageIdx page = do
   chatData <- lift get
   -- Write to file
-  eitherUnit <- lift $ lift $ FilePage.save (chatDataEventsHandle chatData) (FilePage.Index pageIdx, FilePage.Size 8192) page
+  eitherUnit <- lift $ lift $ FilePage.save (chatDataEventsFd chatData) (FilePage.Index pageIdx, FilePage.Size 8192) page
   case eitherUnit of
     Left _ -> throwE "Failed to save events page"
     Right () -> do
