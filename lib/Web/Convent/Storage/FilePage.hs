@@ -65,7 +65,7 @@ read fd (Index ix, Size ps) = (wrapIOError (\err -> ReadIOError err) read') >>= 
                  if fileSize < requiredSize
                    then throwE $ ReadFileTooSmall (fromIntegral requiredSize) (fromIntegral fileSize)
                    else return ()
-                 lift $ PosixIO.fdSeek fd PosixIO.AbsoluteSeek offset
+                 lift $ PosixIO.fdSeek fd IO.AbsoluteSeek offset
                  pageData <- lift $ readExact fd (fromIntegral ps)
                  if ByteString.length pageData < ps
                    then throwE $ ReadFileTooSmall
@@ -76,7 +76,6 @@ read fd (Index ix, Size ps) = (wrapIOError (\err -> ReadIOError err) read') >>= 
 -- | Errors that can occur during page write operations.
 data WriteError = 
    WriteInvalidPageIndex Index  -- ^ Invalid page index (negative)
-   | WriteFileTooSmall Integer Integer  -- ^ File too small: required size, actual size
    | WritePageSizeMismatch Size Size  -- ^ Page size mismatch: expected size, actual data size
    | WriteIOError Prelude.IOError  -- ^ Low-level I/O error
    deriving (Show, Eq)
