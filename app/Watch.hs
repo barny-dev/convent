@@ -16,7 +16,7 @@ import Text.Read (readMaybe)
 
 data EventItem = EventItem
   { eventOffset :: Integer
-  , eventTypeId :: Integer
+  , eventType :: Integer
   , eventData :: Text
   } deriving (Show, Generic)
 
